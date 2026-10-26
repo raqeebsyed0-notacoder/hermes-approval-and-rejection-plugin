@@ -1,0 +1,8 @@
+{
+  "name": "approval-inbox",
+  "label": "Approval Inbox",
+  "description": "One desktop inbox for approval requests routed through the default agent.",
+  "icon": "inbox",
+  "version": "0.1.0",
+  "api": "plugin_api.py"
+}

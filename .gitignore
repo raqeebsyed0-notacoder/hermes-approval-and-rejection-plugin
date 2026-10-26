@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# plugin data / runtime state (not canon)
+work/
+data/
+tests/ui/.stubs-interaction/
+tests/ui/interaction-loader.mjs

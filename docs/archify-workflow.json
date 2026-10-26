@@ -1,0 +1,20 @@
+{
+  "name": "approval-inbox-workflow",
+  "nodes": [
+    {"id": "specialist", "label": "Specialist"},
+    {"id": "default_agent", "label": "Default Agent"},
+    {"id": "founder", "label": "Founder (Desktop Inbox)"},
+    {"id": "mail", "label": "Agent Mail (approvals.jsonl)"},
+    {"id": "plugin", "label": "Approval Inbox Plugin"}
+  ],
+  "edges": [
+    {"from": "specialist", "to": "default_agent", "label": "request"},
+    {"from": "default_agent", "to": "mail", "label": "submit approval"},
+    {"from": "mail", "to": "plugin", "label": "pending items"},
+    {"from": "plugin", "to": "founder", "label": "display"},
+    {"from": "founder", "to": "plugin", "label": "approve/reject"},
+    {"from": "plugin", "to": "mail", "label": "decision"},
+    {"from": "mail", "to": "default_agent", "label": "reply receipt"},
+    {"from": "default_agent", "to": "specialist", "label": "route outcome"}
+  ]
+}
