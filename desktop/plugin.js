@@ -1,6 +1,6 @@
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useState, useEffect } from 'react'
-import { host } from '@hermes/plugin-sdk'
+import { host, ROUTES_AREA, SIDEBAR_NAV_AREA } from '@hermes/plugin-sdk'
 
 export default {
   id: 'approval-inbox',
@@ -45,6 +45,21 @@ export default {
         items.length === 0 ? jsx('div', { children: 'No items' }) : items.map((it) => jsx(ItemCard, { item: it, key: it.msg_id })),
       ] })
     }
+const PAGE_PATH = '/approval-inbox'
     ctx.register({ area: 'PANES_AREA', id: 'inbox', component: InboxPane, placement: 'main' })
+    ctx.registerMany([
+      {
+        id: 'page',
+        area: ROUTES_AREA,
+        data: { path: PAGE_PATH },
+        render: () => jsx(InboxPane, {})
+      },
+      {
+        id: 'nav',
+        area: SIDEBAR_NAV_AREA,
+        order: 60,
+        data: { codicon: 'inbox', label: 'Approval Inbox', path: PAGE_PATH }
+      }
+    ])
   }
 }
