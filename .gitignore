@@ -7,3 +7,4 @@ work/
 data/
 tests/ui/.stubs-interaction/
 tests/ui/interaction-loader.mjs
+tests/ui-smoke/.tmp-load/

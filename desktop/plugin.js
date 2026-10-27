@@ -251,7 +251,7 @@ export default {
   id: ID,
   name: 'Approval Inbox',
   description: 'One desktop inbox for approval requests routed through the default agent.',
-  defaultEnabled: false,
+  defaultEnabled: true,
 
   register(ctx) {
     ensureStyles()
