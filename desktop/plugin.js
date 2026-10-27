@@ -29,7 +29,7 @@ import { useState } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.4.2'
+const APP_VERSION = '0.4.3'
 
 // Assigned in register(ctx) — components can't see ctx directly.
 let rest = null
@@ -171,13 +171,12 @@ function useDecide() {
   return useMutation({
     mutationFn: ({ item, decision, note }) => rest('/decide', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: {
         msg_id: item.msg_id,
         decision,
         note: note || '',
         artifact_version: (item.artifact || {}).version,
-      }),
+      },
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: [ID] }) },
     onError: (e) => { host?.notify?.({ kind: 'error', message: errText(e) || 'request failed' }) },

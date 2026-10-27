@@ -14,4 +14,8 @@ console.log('MISSING-FROM-PROVEN-SURFACE:', JSON.stringify(missing))
 // 'SIDEBAR_NAV_AREA' registers into a dead bucket nobody reads, with no error.
 const quotedAreas = [...src.matchAll(/area\s*:\s*'(ROUTES_AREA|SIDEBAR_NAV_AREA|PALETTE_AREA)'/g)].map(m => m[1])
 console.log('QUOTED-AREA-FAIL:', JSON.stringify(quotedAreas))
-if (missing.length || quotedAreas.length) process.exit(1)
+// rest() takes a body OBJECT (newswire pattern); a JSON.stringify body gets
+// double-wrapped and the backend 422s. Static guard against that envelope bug.
+const stringifiedBodies = [...src.matchAll(/body\s*:\s*JSON\.stringify\(/g)].length
+console.log('STRINGIFY-BODY:', JSON.stringify(stringifiedBodies))
+if (missing.length || quotedAreas.length || stringifiedBodies) process.exit(1)
