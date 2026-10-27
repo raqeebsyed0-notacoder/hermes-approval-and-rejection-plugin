@@ -17,8 +17,8 @@
  */
 
 import {
-  ErrorState, GlyphSpinner, host, Input,
-  ScrollArea, useQuery, queryClient,
+  ErrorState, GlyphSpinner, host, Input, PALETTE_AREA,
+  ROUTES_AREA, ScrollArea, SIDEBAR_NAV_AREA, useQuery, queryClient,
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useEffect, useState } from 'react'
@@ -260,15 +260,25 @@ export default {
     ctx.registerMany([
       {
         id: 'page',
-        area: 'ROUTES_AREA',
+        area: ROUTES_AREA,
         data: { path: PAGE_PATH },
         render: () => jsx(InboxPane, {}),
       },
       {
         id: 'nav',
-        area: 'SIDEBAR_NAV_AREA',
+        area: SIDEBAR_NAV_AREA,
         order: 60,
         data: { codicon: 'inbox', label: 'Approval Inbox', path: PAGE_PATH },
+      },
+      {
+        id: 'open',
+        area: PALETTE_AREA,
+        data: {
+          id: `${ID}.open`,
+          label: 'Approval Inbox: Open',
+          keywords: ['approval', 'inbox', 'approvals'],
+          run: () => { if (host?.navigate) host.navigate(PAGE_PATH) },
+        },
       },
     ])
   },

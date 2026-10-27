@@ -10,3 +10,8 @@ const needed = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*'@hermes\/plugin-
 console.log('NEEDS:', JSON.stringify(needed))
 const missing = needed.filter(n => !PROVEN.includes(n))
 console.log('MISSING-FROM-PROVEN-SURFACE:', JSON.stringify(missing))
+// Area keys are exact strings ('routes', 'sidebar.nav', 'palette'): a quoted
+// 'SIDEBAR_NAV_AREA' registers into a dead bucket nobody reads, with no error.
+const quotedAreas = [...src.matchAll(/area\s*:\s*'(ROUTES_AREA|SIDEBAR_NAV_AREA|PALETTE_AREA)'/g)].map(m => m[1])
+console.log('QUOTED-AREA-FAIL:', JSON.stringify(quotedAreas))
+if (missing.length || quotedAreas.length) process.exit(1)
