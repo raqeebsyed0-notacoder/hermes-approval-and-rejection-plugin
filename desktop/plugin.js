@@ -29,7 +29,7 @@ import { useState } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.4.4'
+const APP_VERSION = '0.4.5'
 
 // Assigned in register(ctx) — components can't see ctx directly.
 let rest = null
@@ -182,7 +182,11 @@ function useDecide() {
       queryClient.invalidateQueries({ queryKey: [ID] })
       const t = data && data.trigger
       if (t && t.triggered) {
-        host?.notify?.({ kind: 'success', message: `Decision sent to the default agent (${t.task || 'task created'})` })
+        const d = t.dispatch
+        const msg = (d && d.ok)
+          ? `Decision sent — the default agent was woken (${t.task || 'task created'})`
+          : `Decision sent (${t.task || 'task created'}). Wake-up call: ${(d && d.detail) || 'pending — check ops log'}`
+        host?.notify?.({ kind: (d && d.ok) ? 'success' : 'warning', message: msg })
       } else if (t) {
         host?.notify?.({ kind: 'error', message: `Decision saved, but the wake-up call failed: ${t.reason || 'unknown reason'}` })
       }

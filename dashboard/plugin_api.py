@@ -231,10 +231,43 @@ def _resolve_actor(request):
     return "default", "default"
 
 
+_HERMES_BIN_CANDIDATES = [
+    "/home/euphoria/.local/bin/hermes",
+    "/home/euphoria/euphoria-v2/apps/hermes/source-v2026.8.27/.hermes/bin/hermes",
+]
+
+
+def _resolve_hermes_bin():
+    """Absolute hermes binary for the trigger subprocess.
+
+    The dashboard serve child runs with a minimal PATH (no user bin dirs),
+    so a bare `hermes` dies with FileNotFoundError and the Founder's tap
+    ends at the ledger — live-proven 2026-10-27 (two decided cards, zero
+    kanban tasks). Resolve once per call; fall back to known install paths.
+    """
+    found = shutil.which("hermes")
+    if found and os.path.isfile(found) and os.access(found, os.X_OK):
+        return found
+    for cand in _HERMES_BIN_CANDIDATES:
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
+def _extract_task_id(text):
+    m = re.search(r"t_[0-9a-f]{6,}", text or "")
+    return m.group(0) if m else (text or "").strip()[:200]
+
+
 def _trigger_default(decision, req, note, actor):
     """Wake the default agent with the Founder's verdict (exactly-once per msg)."""
     if os.environ.get("APPROVAL_INBOX_NO_TRIGGER") == "1":
         return {"triggered": False, "reason": "disabled by env"}
+    hermes_bin = _resolve_hermes_bin()
+    if not hermes_bin:
+        _oplog("trigger", "failed", "hermes binary not found (PATH + fallbacks)")
+        return {"triggered": False,
+                "reason": "hermes binary not found on this host — task not created"}
     art = req.get("artifact") or {}
     packet = "\n".join([
         f"Founder decision: {decision.upper()}",
@@ -252,17 +285,45 @@ def _trigger_default(decision, req, note, actor):
     try:
         env = dict(os.environ)
         env.setdefault("HERMES_HOME", HERMES_HOME)
+        # The serve child PATH lacks user bin dirs — make sure the resolved
+        # binary's directory survives into the child environment too.
+        bindir = os.path.dirname(hermes_bin)
+        if bindir and bindir not in env.get("PATH", "").split(os.pathsep):
+            env["PATH"] = bindir + os.pathsep + env.get("PATH", "")
         proc = subprocess.run(
-            ["hermes", "kanban", "--board", TRIGGER_BOARD, "create",
+            [hermes_bin, "kanban", "--board", TRIGGER_BOARD, "create",
              "--assignee", "default",
              "--idempotency-key", f"approval-{req.get('msg_id')}",
              "--body", packet, title],
             capture_output=True, text=True, env=env, timeout=60)
         if proc.returncode != 0:
             _oplog("trigger", "failed", (proc.stderr or "")[:200])
-            return {"triggered": False, "reason": (proc.stderr or "kanban create failed")[:200]}
+            return {"triggered": False,
+                    "hermes_bin": hermes_bin,
+                    "reason": (proc.stderr or "kanban create failed")[:200]}
+        task_id = _extract_task_id(proc.stdout)
         _oplog("trigger", decision, req.get("msg_id") or "")
-        return {"triggered": True, "task": (proc.stdout or "").strip()[:200]}
+        # A created task still sits in todo until something dispatches it —
+        # no daemon watches this board, so run a bounded one-shot dispatch
+        # tick. Dispatch trouble is reported, never voids the decision.
+        dispatch = {"attempted": True, "ok": False, "detail": "not attempted"}
+        try:
+            dproc = subprocess.run(
+                [hermes_bin, "kanban", "--board", TRIGGER_BOARD,
+                 "dispatch", "--max", "1"],
+                capture_output=True, text=True, env=env, timeout=120)
+            detail = ((dproc.stdout or "") + " " + (dproc.stderr or "")).strip()
+            dispatch = {"attempted": True,
+                        "ok": dproc.returncode == 0,
+                        "detail": detail[:200] or f"exit={dproc.returncode}"}
+            _oplog("dispatch", "ok" if dproc.returncode == 0 else "failed",
+                   f"{task_id} {dispatch['detail'][:120]}")
+        except Exception as e:
+            dispatch = {"attempted": True, "ok": False,
+                        "detail": str(e)[:200]}
+            _oplog("dispatch", "error", str(e)[:200])
+        return {"triggered": True, "task": task_id, "hermes_bin": hermes_bin,
+                "dispatch": dispatch}
     except Exception as e:
         _oplog("trigger", "error", str(e)[:200])
         return {"triggered": False, "reason": str(e)[:200]}

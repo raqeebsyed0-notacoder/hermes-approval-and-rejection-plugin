@@ -264,28 +264,54 @@ def test_trigger_builds_exactly_once_task(c, monkeypatch):
 
     class FakeProc:
         returncode = 0
-        stdout = "t_abc123"
+        stdout = "Created t_abc123  (ready, assignee=default)"
+        stderr = ""
+
+    class FakeDispatch:
+        returncode = 0
+        stdout = "Spawned:      1\n  - t_abc123  ->  default"
         stderr = ""
 
     def fake_run(cmd, **kw):
         calls.append(cmd)
         envs.append(kw.get("env") or {})
+        if "dispatch" in cmd:
+            return FakeDispatch()
         return FakeProc()
 
     monkeypatch.setattr(papi.subprocess, "run", fake_run)
     req = {"msg_id": "m20261027-000002", "subject": "S", "work_id": "w",
            "artifact": {"name": "a", "version": "v1"}, "next_action": "go"}
     out = papi._trigger_default("approve", req, "ok", "default")
-    assert out == {"triggered": True, "task": "t_abc123"}
-    cmd = calls[0]
-    assert "--assignee" in cmd and "default" in cmd
-    assert "approval-m20261027-000002" in cmd
-    assert "--board" in cmd
+    assert out["triggered"] is True
+    assert out["task"] == "t_abc123"
+    # the binary must be absolute: the serve child PATH has no user bin dirs
+    # (live-proven FileNotFoundError 2026-10-27), so a bare "hermes" is a bug
+    assert os.path.isabs(calls[0][0]) and "hermes" in calls[0][0]
+    create_cmd = calls[0]
+    assert "--assignee" in create_cmd and "default" in create_cmd
+    assert "approval-m20261027-000002" in create_cmd
+    assert "--board" in create_cmd
     assert envs[0].get("HERMES_HOME")
+    # a created task still needs a dispatch tick to wake anyone
+    assert any("dispatch" in cmd for cmd in calls[1:])
+    assert out["dispatch"]["attempted"] is True
+    assert out["dispatch"]["ok"] is True
+
+
+def test_resolve_hermes_bin_is_absolute_and_executable(c):
+    import dashboard.plugin_api as papi
+
+    b = papi._resolve_hermes_bin()
+    assert b is not None
+    assert os.path.isabs(b)
+    assert os.access(b, os.X_OK)
 
 
 def test_trigger_failure_never_raises(c, monkeypatch):
     import dashboard.plugin_api as papi
+
+    monkeypatch.delenv("APPROVAL_INBOX_NO_TRIGGER", raising=False)
 
     def fake_run(cmd, **kw):
         raise FileNotFoundError("no hermes on PATH")
@@ -296,6 +322,19 @@ def test_trigger_failure_never_raises(c, monkeypatch):
     out = papi._trigger_default("reject", req, "", "default")
     assert out["triggered"] is False
     assert out["reason"]
+
+
+def test_trigger_without_any_binary_names_the_fix(c, monkeypatch):
+    import dashboard.plugin_api as papi
+
+    monkeypatch.delenv("APPROVAL_INBOX_NO_TRIGGER", raising=False)
+    monkeypatch.setattr(papi.shutil, "which", lambda *_a, **_k: None)
+    monkeypatch.setattr(papi, "_HERMES_BIN_CANDIDATES", ["/nonexistent/hermes"])
+    req = {"msg_id": "m20261027-000004", "subject": "S", "work_id": "w",
+           "artifact": {}, "next_action": None}
+    out = papi._trigger_default("approve", req, "", "default")
+    assert out["triggered"] is False
+    assert "hermes binary not found" in out["reason"]
 
 
 def test_oversize_image_lists_but_does_not_inline(c):
