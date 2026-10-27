@@ -51,9 +51,19 @@ returned as a loud `oae_warning`, not a 500.
 
 ## CI
 
-`bash tools/ci.sh` — pytest, strict ESM gate
+`bash tools/ci.sh` — pytest, version sync, strict ESM gate
 (`node --input-type=module --check`; plain `--check` is a known false
 clean on ESM), UI smoke tests, plugin validation.
+
+## Rollback
+
+Every release is tagged (`v0.4.4`, …). To roll back, reinstall from the
+tag instead of `main` (same Install-from-git dialog, force reinstall,
+at the previous stable tag).
+
+Backend code loads when the Desktop app starts: after any update or
+rollback, fully quit and reopen the app — Rescan alone does not reload
+the backend.
 
 ## Verify
 

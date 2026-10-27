@@ -108,6 +108,27 @@ def _msg_files_dir(msg_id):
     return os.path.join(FILES_DIR, re.sub(r"[^A-Za-z0-9._-]", "_", msg_id or "unknown")[:64])
 
 
+def _within(base, path):
+    return os.path.realpath(path).startswith(os.path.realpath(base) + os.sep)
+
+
+def _sniff(content_type, raw):
+    """Magic-byte check so the label matches the bytes, not just the name."""
+    if content_type == "image/png":
+        return raw[:8] == b"\x89PNG\r\n\x1a\n"
+    if content_type in ("image/jpeg",):
+        return raw[:2] == b"\xff\xd8"
+    if content_type == "image/gif":
+        return raw[:6] in (b"GIF87a", b"GIF89a")
+    if content_type == "image/webp":
+        return len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
+    if content_type in ("video/mp4", "video/webm"):
+        return len(raw) >= 12 and (raw[4:8] == b"ftyp" or raw[:4] == b"\x1a\x45\xdf\xa3")
+    if content_type == "application/pdf":
+        return raw[:5] == b"%PDF-"
+    return False
+
+
 def _attachments_manifest(msg_id):
     d = _msg_files_dir(msg_id)
     if not os.path.isdir(d):
@@ -152,18 +173,26 @@ def _store_attachments(msg_id, attachments):
         ctype = (a.get("content_type") or _guess_type(name)).split(";")[0].strip()
         if ctype not in ALLOWED_TYPES:
             raise HTTPException(status_code=400, detail=f"attachment type not allowed: {ctype}")
+        b64 = a.get("data_b64") or ""
+        if len(b64) > (MAX_TOTAL_BYTES * 4 // 3) + 1024:
+            raise HTTPException(status_code=400, detail=f"attachment too large: {name}")
         try:
-            raw = base64.b64decode(a.get("data_b64") or "", validate=True)
+            raw = base64.b64decode(b64, validate=True)
         except Exception:
             raise HTTPException(status_code=400, detail=f"attachment is not valid base64: {name}")
         if len(raw) > MAX_FILE_BYTES:
             raise HTTPException(status_code=400, detail=f"attachment too large (max 15MB): {name}")
+        if not _sniff(ctype, raw):
+            raise HTTPException(status_code=400, detail=f"attachment bytes do not match {ctype}: {name}")
         total += len(raw)
         if total > MAX_TOTAL_BYTES:
             raise HTTPException(status_code=400, detail="attachments exceed 30MB total")
         d = _msg_files_dir(msg_id)
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, name), "wb") as fh:
+        dest = os.path.join(d, name)
+        if not _within(d, dest):
+            raise HTTPException(status_code=400, detail="bad attachment name")
+        with open(dest, "wb") as fh:
             fh.write(raw)
         stored.append({"name": name, "size": len(raw), "content_type": ctype,
                        "kind": _kind_of(ctype),
@@ -391,7 +420,7 @@ def serve_file(msg_id: str, name: str):
     if safe_name != name:
         raise HTTPException(status_code=404, detail="not found")
     path = os.path.join(FILES_DIR, safe_msg, safe_name)
-    if not os.path.isfile(path):
+    if not _within(FILES_DIR, path) or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="not found")
     return FileResponse(path, media_type=_guess_type(safe_name), filename=safe_name)
 
@@ -454,8 +483,12 @@ def decide(payload: DecidePayload, request: Request):
         "--note", payload.note or "", "--task-id", str(req.get("work_id") or "-"),
     ])
     if rc != 0:
+        combined = f"{err}\n{out}"
+        if "already decided" in combined:
+            _oplog("decide", "rejected-decided", payload.msg_id[:50])
+            raise HTTPException(status_code=409, detail="already decided")
         _oplog("decide", "failed", (err or "")[:200])
-        raise HTTPException(status_code=500, detail={"rc": rc, "stderr": err, "stdout": out})
+        raise HTTPException(status_code=500, detail={"rc": rc, "error": (err or "decision failed")[:200]})
     _oplog("decide", payload.decision, f"{payload.msg_id} by {actor}({actor_source})")
     # record approved version sidecar (plugin metadata, not business canon)
     if payload.decision == "approve":

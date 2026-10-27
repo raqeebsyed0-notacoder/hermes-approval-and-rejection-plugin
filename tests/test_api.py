@@ -253,3 +253,61 @@ def test_submit_survives_oae_failure_when_local_delivered(c, monkeypatch):
     assert body["msg_id"] == fake_id
     assert "oae_warning" in body
     assert len(body["attachments"]) == 1
+
+
+def test_trigger_builds_exactly_once_task(c, monkeypatch):
+    import dashboard.plugin_api as papi
+
+    monkeypatch.delenv("APPROVAL_INBOX_NO_TRIGGER", raising=False)
+    calls = []
+    envs = []
+
+    class FakeProc:
+        returncode = 0
+        stdout = "t_abc123"
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        envs.append(kw.get("env") or {})
+        return FakeProc()
+
+    monkeypatch.setattr(papi.subprocess, "run", fake_run)
+    req = {"msg_id": "m20261027-000002", "subject": "S", "work_id": "w",
+           "artifact": {"name": "a", "version": "v1"}, "next_action": "go"}
+    out = papi._trigger_default("approve", req, "ok", "default")
+    assert out == {"triggered": True, "task": "t_abc123"}
+    cmd = calls[0]
+    assert "--assignee" in cmd and "default" in cmd
+    assert "approval-m20261027-000002" in cmd
+    assert "--board" in cmd
+    assert envs[0].get("HERMES_HOME")
+
+
+def test_trigger_failure_never_raises(c, monkeypatch):
+    import dashboard.plugin_api as papi
+
+    def fake_run(cmd, **kw):
+        raise FileNotFoundError("no hermes on PATH")
+
+    monkeypatch.setattr(papi.subprocess, "run", fake_run)
+    req = {"msg_id": "m20261027-000003", "subject": "S", "work_id": "w",
+           "artifact": {}, "next_action": None}
+    out = papi._trigger_default("reject", req, "", "default")
+    assert out["triggered"] is False
+    assert out["reason"]
+
+
+def test_oversize_image_lists_but_does_not_inline(c):
+    big = b"\x89PNG\r\n\x1a\n" + (b"\x00" * (9 * 1024 * 1024))
+    payload = {"type": "post", "owner": "x", "work_id": "t_big",
+               "artifact": {"name": "a", "version": "v1"},
+               "attachments": [{"name": "huge.png", "content_type": "image/png",
+                                "data_b64": base64.b64encode(big).decode("ascii")}]}
+    r = c.post("/api/plugins/approval-inbox/submit", json=payload)
+    assert r.status_code == 200
+    msg_id = r.json()["msg_id"]
+    pv = c.get(f"/api/plugins/approval-inbox/preview/{msg_id}").json()
+    item = next(i for i in pv["items"] if i["name"] == "huge.png")
+    assert item["data_url"] is None
+    assert item["size"] == len(big)
