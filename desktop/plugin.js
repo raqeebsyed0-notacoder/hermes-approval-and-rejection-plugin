@@ -29,6 +29,7 @@ import { useState } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
+const APP_VERSION = '0.4.2'
 
 // Assigned in register(ctx) — components can't see ctx directly.
 let rest = null
@@ -219,7 +220,18 @@ function StatusBadge({ status }) {
 function PreviewBlock({ msgId, hasFiles }) {
   const pv = usePreview(msgId, hasFiles)
   const [expanded, setExpanded] = useState(null)
-  if (!hasFiles || pv.isLoading || pv.isError) return null
+  if (!hasFiles || pv.isLoading) return null
+  if (pv.isError) {
+    const status = pv.error && (pv.error.status || pv.error.statusCode)
+    const oldBackend = status === 404
+    return jsxs('div', { className: `${ID}-prev`, children: [
+      jsx('div', { className: `${ID}-prevPdf`, children:
+        jsx('span', { className: `${ID}-note`, children: oldBackend
+          ? 'Preview needs the new backend — fully quit and reopen your Desktop app, then come back.'
+          : 'Could not load the preview.' }) }),
+      jsx(Button, { size: 'xs', variant: 'outline', onClick: () => pv.refetch(), children: 'Retry preview' }),
+    ] })
+  }
   const files = pv.data || []
   if (files.length === 0) return null
   const images = files.filter(f => f.kind === 'image' && f.data_url)
@@ -369,6 +381,7 @@ function InboxPane() {
         jsx('span', { className: `${ID}-title`, children: 'Approval Inbox' }),
       ] }),
       jsx(Badge, { variant: 'outline', children: `${pending.length} to review` }),
+      jsx('span', { className: `${ID}-time`, title: 'Inbox plugin version', children: `v${APP_VERSION}` }),
       jsx('span', { style: { flex: 1 } }),
       jsx(SearchField, {
         value: needle,
