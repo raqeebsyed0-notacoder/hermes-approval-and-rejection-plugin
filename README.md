@@ -25,6 +25,17 @@ plugins:
 Restart the desktop serve child so the backend mounts at
 `/api/plugins/approval-inbox/`.
 
+## Inbox UI (0.3.0)
+
+- Header: title, `N to review` badge, search (subject, owner, artifact),
+  refresh.
+- Filter row: Needs decision / Approved / Rejected / All, with counts.
+  Search + filter are remembered between visits.
+- Cards: status badge, subject line, owner / work / artifact / next action,
+  preview link. Pending first, newest first; decided cards dim.
+- Approve asks for confirmation naming the artifact; reject takes a reason
+  that travels with the decision. Failures surface as an error toast.
+
 ## Verify
 
 ```bash

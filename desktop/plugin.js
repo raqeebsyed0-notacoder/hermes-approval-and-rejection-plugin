@@ -3,31 +3,37 @@
  *
  * One surface for approval requests routed through the default agent.
  * Mirrors the hermes-newswire pane pattern:
- *   themed header, item cards with status badges, loading/empty/error
- *   states, preview/open action, refresh control, and error notify.
+ *   themed header, search + status filter, item cards with badges,
+ *   loading/empty/error states, preview/open action, refresh control.
  *
  * Backend (dashboard/plugin_api.py) mounts at /api/plugins/approval-inbox/.
  *
  * Design notes (Founder order 2026-10-27):
  *   - Decision carries the reason: reject is a two-step (open reason input,
- *     send with note). The backend /decide already takes `note`.
+ *     send with note). Approve is two-step too (confirm dialog naming the
+ *     artifact). The backend /decide already takes `note`.
  *   - Decided rows show decision + note + actor.
  *   - Pending / approved / rejected badges; approve/reject only while pending.
  *   - No bare divs where a themed component belongs.
+ *   - Contract: docs/DESIGN-inbox-v2.md.
  */
 
 import {
-  ErrorState, GlyphSpinner, host, Input, PALETTE_AREA,
-  ROUTES_AREA, ScrollArea, SIDEBAR_NAV_AREA, useQuery, queryClient,
+  Badge, Button, ConfirmDialog, EmptyState, ErrorState, GlyphSpinner,
+  host, Input, PALETTE_AREA, ROUTES_AREA, ScrollArea, SearchField,
+  SegmentedControl, SIDEBAR_NAV_AREA, queryClient,
+  useMutation, useQuery,
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
 
 // Assigned in register(ctx) — components can't see ctx directly.
 let rest = null
+let storeGet = null
+let storeSet = null
 
 // ─────────────────────────────────────────────────────────────────────────
 // Styles (content-compared, hot-reload safe)
@@ -43,39 +49,29 @@ function ensureStyles() {
     `.${ID}-brand:hover { background: var(--chrome-action-hover); }`,
     `.${ID}-brand:focus-visible { outline: 1px solid var(--ui-accent); outline-offset: -1px; }`,
     `.${ID}-title { font-weight: 600; font-size: 0.875rem; line-height: 1.2; }`,
-    `.${ID}-count { flex: none; font-size: 0.75rem; color: var(--ui-text-secondary); }`,
-    `.${ID}-actions { display: flex; align-items: center; gap: 0.5rem; flex: none; }`,
-    `.${ID}-refresh { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; background: none; border: 0; cursor: pointer; color: var(--ui-text-secondary); border-radius: 0.25rem; padding: 0; font-size: 0.75rem; }`,
-    `.${ID}-refresh:hover { background: var(--chrome-action-hover); color: var(--ui-text-primary); }`,
-    `.${ID}-refresh:focus-visible { outline: 1px solid var(--ui-accent); outline-offset: -1px; }`,
+    `.${ID}-filters { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--ui-stroke-secondary); flex: none; flex-wrap: wrap; }`,
     /* body */
     `.${ID}-body { flex: 1 1 auto; min-height: 0; }`,
     `.${ID}-scroll { flex: 1 1 auto; overflow: auto; padding: 0.5rem; }`,
+    `.${ID}-list { display: flex; flex-direction: column; gap: 0.5rem; }`,
+    `.${ID}-section { font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ui-text-quaternary); padding: 0.5rem 0.25rem 0; }`,
     /* item card */
-    `.${ID}-card { border: 1px solid var(--ui-stroke-secondary); border-radius: 0.5rem; padding: 0.75rem 0.875rem; margin-bottom: 0.5rem; background: var(--ui-bg-card); cursor: default; }`,
+    `.${ID}-card { border: 1px solid var(--ui-stroke-secondary); border-radius: 0.5rem; padding: 0.75rem 0.875rem; background: var(--ui-bg-card); cursor: default; }`,
     `.${ID}-card:hover { border-color: var(--ui-accent); }`,
+    `.${ID}-card-decided { opacity: 0.82; }`,
     `.${ID}-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }`,
-    `.${ID}-status { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.6875rem; font-weight: 600; padding: 0.125rem 0.5rem; border-radius: 999px; letter-spacing: 0.02em; }`,
-    `.${ID}-status-pending { color: #b45309; background: #fef3c7; }`,
-    `.${ID}-status-approved { color: #047857; background: #d1fae5; }`,
-    `.${ID}-status-rejected { color: #b91c1c; background: #fee2e2; }`,
-    `.${ID}-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; }`,
-    `.${ID}-meta { display: flex; flex-direction: column; gap: 0.125rem; font-size: 0.75rem; color: var(--ui-text-secondary); }`,
+    `.${ID}-subject { font-weight: 600; font-size: 0.8125rem; line-height: 1.35; margin-top: 0.375rem; overflow-wrap: anywhere; }`,
+    `.${ID}-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; display: inline-block; margin-right: 0.375rem; }`,
+    `.${ID}-meta { display: flex; flex-direction: column; gap: 0.125rem; font-size: 0.75rem; color: var(--ui-text-secondary); margin-top: 0.375rem; }`,
     `.${ID}-metaRow { display: flex; gap: 0.5rem; align-items: baseline; }`,
     `.${ID}-metaLabel { flex: none; min-width: 4.5rem; color: var(--ui-text-quaternary); font-weight: 500; }`,
     `.${ID}-preview { display: inline-flex; align-items: center; gap: 0.25rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--ui-stroke-tertiary); color: var(--ui-accent); text-decoration: none; font-size: 0.75rem; }`,
     `.${ID}-preview:hover { color: var(--ui-text-primary); }`,
     /* decision controls */
-    `.${ID}-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--ui-stroke-tertiary); }`,
-    `.${ID}-reasonRow { display: flex; gap: 0.5rem; align-items: center; flex: 1; min-width: 0; }`,
-    `.${ID}-reasonRow input { flex: 1; min-width: 0; font: inherit; font-size: 0.75rem; color: var(--ui-text-primary); background: var(--ui-bg-card); border: 1px solid var(--ui-stroke-secondary); border-radius: 0.375rem; padding: 0.25rem 0.5rem; }`,
-    `.${ID}-reasonRow input:focus-visible { outline: 1px solid var(--ui-accent); outline-offset: -1px; }`,
-    `.${ID}-note { font-size: 0.75rem; color: var(--ui-text-secondary); white-space: pre-line; line-height: 1.4; }`,
+    `.${ID}-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--ui-stroke-tertiary); flex-wrap: wrap; }`,
+    `.${ID}-reasonRow { display: flex; gap: 0.5rem; align-items: center; flex: 1; min-width: 0; flex-basis: 100%; }`,
+    `.${ID}-note { font-size: 0.75rem; color: var(--ui-text-secondary); white-space: pre-line; line-height: 1.4; overflow-wrap: anywhere; }`,
     `.${ID}-time { font-size: 0.6875rem; color: var(--ui-text-quaternary); white-space: nowrap; }`,
-    /* empty / error */
-    `.${ID}-empty { padding: 1.5rem; text-align: center; color: var(--ui-text-secondary); }`,
-    `.${ID}-error { padding: 1rem; color: var(--ui-red, #e5484d); }`,
-    `.${ID}-error button { margin-top: 0.5rem; }`,
   ].join('\n')
 
   let style = document.getElementById(`${ID}-styles`)
@@ -111,7 +107,7 @@ function absTime(iso) {
   return t.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-// Bridge backend HTTPException details ("409: {"detail":"…"}") into the message.
+// Bridge backend HTTPException details ("409: {\"detail\":\"…\"}") into the message.
 function errText(e) {
   const raw = String(e?.message || e || '')
   const m = /"message"\s*:\s*"(?:[^"\\]|\\.)*"/.exec(raw)
@@ -121,8 +117,30 @@ function errText(e) {
   return raw.slice(0, 300)
 }
 
+function asText(v) {
+  return typeof v === 'string' ? v : (v?.target?.value ?? '')
+}
+
+function itemTitle(item) {
+  if (item.subject) return item.subject
+  const art = item.artifact || {}
+  if (art.name) return `${item.type || 'approval'}: ${art.name} v${art.version || '?'}`
+  return `${item.type || 'approval'} request`
+}
+
+function matches(item, needle) {
+  if (!needle) return true
+  const hay = [
+    item.subject, item.type, item.owner, item.work_id,
+    item.originating_agent, item.next_action,
+    item.artifact && item.artifact.name, item.artifact && item.artifact.version,
+    item.decision && item.decision.note,
+  ].filter(Boolean).join(' ').toLowerCase()
+  return hay.includes(needle.toLowerCase())
+}
+
 // ─────────────────────────────────────────────────────────────────────────
-// Data hook
+// Data hook + decide mutation
 // ─────────────────────────────────────────────────────────────────────────
 
 function useItems() {
@@ -138,71 +156,89 @@ function useItems() {
   })
 }
 
+function useDecide() {
+  return useMutation({
+    mutationFn: ({ item, decision, note }) => rest('/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        msg_id: item.msg_id,
+        decision,
+        note: note || '',
+        artifact_version: (item.artifact || {}).version,
+      }),
+    }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: [ID] }) },
+    onError: (e) => { host?.notify?.({ kind: 'error', message: errText(e) || 'request failed' }) },
+  })
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Item card
 // ─────────────────────────────────────────────────────────────────────────
 
-function ItemCard({ item }) {
-  const [busy, setBusy] = useState(false)
-  const [rejectNote, setRejectNote] = useState(item.decision?.note || '')
+const DOT = { pending: '#b45309', approved: '#047857', rejected: '#b91c1c' }
+
+function StatusBadge({ status }) {
+  return jsx(Badge, { variant: 'outline', children: [
+    jsx('span', { className: `${ID}-dot`, style: { backgroundColor: DOT[status] || DOT.pending } }),
+    jsx('span', { children: status }),
+  ] })
+}
+
+function ItemCard({ item, decide, busy }) {
+  const [rejectNote, setRejectNote] = useState((item.decision && item.decision.note) || '')
   const [rejectOpen, setRejectOpen] = useState(false)
+  const [approveOpen, setApproveOpen] = useState(false)
   const art = item.artifact || {}
   const decision = item.decision || {}
   const decided = item.status !== 'pending'
-  const preview = item.preview_url || art.preview_url || art.name
+  const preview = item.preview_url || art.preview_url
+  const title = itemTitle(item)
 
-  const decide = async (decisionValue) => {
-    setBusy(true)
-    const note = decisionValue === 'reject' ? rejectNote : (decision.note || '')
-    await rest('/decide', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ msg_id: item.msg_id, decision: decisionValue, note, artifact_version: art.version }),
-    })
-      .catch((e) => {
-        const msg = errText(e) || 'request failed'
-        host?.notify?.({ kind: 'error', message: msg })
-      })
-      .finally(() => setBusy(false))
+  const sendReject = () => {
+    decide.mutate({ item, decision: 'reject', note: rejectNote })
+    setRejectOpen(false)
   }
 
-  return jsxs('div', { className: `${ID}-card`, children: [
+  return jsxs('div', { className: `${ID}-card${decided ? ` ${ID}-card-decided` : ''}`, children: [
     /* header: status badge + relative time */
     jsxs('div', { className: `${ID}-head`, children: [
-      jsx('span', {
-        className: `${ID}-status ${decided ? `${ID}-status-${item.status}` : `${ID}-status-pending`}`,
-        children: [
-          jsx('span', { className: `${ID}-dot`, style: { backgroundColor: decided ? (item.status === 'approved' ? '#047857' : '#b91c1c') : '#b45309' } }),
-          jsx('span', { children: decided ? item.status : 'pending' }),
-        ],
-      }),
-      jsx('span', { className: `${ID}-time`, children: relTime(item.ts) || absTime(item.ts) || '' }),
+      jsx(StatusBadge, { status: decided ? item.status : 'pending' }),
+      jsx('span', { className: `${ID}-time`, title: absTime(item.ts), children: relTime(item.ts) || absTime(item.ts) || '' }),
     ]}),
+
+    /* subject line */
+    jsx('div', { className: `${ID}-subject`, children: title }),
 
     /* metadata rows */
     jsxs('div', { className: `${ID}-meta`, children: [
-      jsx('div', { className: `${ID}-metaRow`, children: [ jsx('span', { className: `${ID}-metaLabel`, children: 'Type' }), jsx('span', { children: item.type || '-' }) ] }),
-      jsx('div', { className: `${ID}-metaRow`, children: [ jsx('span', { className: `${ID}-metaLabel`, children: 'Owner' }), jsx('span', { children: item.owner || '-' }) ] }),
-      jsx('div', { className: `${ID}-metaRow`, children: [ jsx('span', { className: `${ID}-metaLabel`, children: 'Work' }), jsx('span', { children: item.work_id || '-' }) ] }),
-      jsx('div', { className: `${ID}-metaRow`, children: [ jsx('span', { className: `${ID}-metaLabel`, children: 'Artifact' }), jsx('span', { children: art.name ? `${art.name} v${art.version || '-'}` : 'none on record' }) ] }),
-      jsx('div', { className: `${ID}-metaRow`, children: [ jsx('span', { className: `${ID}-metaLabel`, children: 'Next action' }), jsx('span', { children: item.next_action || '-' }) ] }),
-      preview ? jsx('a', { href: String(preview), target: '_blank', rel: 'noopener noreferrer', className: `${ID}-preview`, children: [ 'Preview/Open' ] }) : null,
+      jsx('div', { className: `${ID}-metaRow`, children: [jsx('span', { className: `${ID}-metaLabel`, children: 'Owner' }), jsx('span', { children: item.owner || item.originating_agent || '-' })] }),
+      item.work_id ? jsx('div', { className: `${ID}-metaRow`, children: [jsx('span', { className: `${ID}-metaLabel`, children: 'Work' }), jsx('span', { children: item.work_id })] }) : null,
+      art.name ? jsx('div', { className: `${ID}-metaRow`, children: [jsx('span', { className: `${ID}-metaLabel`, children: 'Artifact' }), jsx('span', { children: `${art.name} v${art.version || '?'}` })] }) : null,
+      item.next_action ? jsx('div', { className: `${ID}-metaRow`, children: [jsx('span', { className: `${ID}-metaLabel`, children: 'Next action' }), jsx('span', { children: item.next_action })] }) : null,
+      preview ? jsx('a', { href: String(preview), target: '_blank', rel: 'noopener noreferrer', className: `${ID}-preview`, children: 'Open preview' }) : null,
     ]}),
 
     /* decision controls */
-    !decided ? jsx('div', { className: `${ID}-actions`, children: [
-      jsx('button', { size: 'sm', onClick: () => decide('approve'), disabled: busy, children: busy ? 'Working…' : 'Approve' }),
-      jsx('button', { size: 'sm', variant: 'ghost', onClick: () => setRejectOpen(v => !v), disabled: busy, children: 'Reject' }),
-      rejectOpen ? jsx('div', { className: `${ID}-reasonRow`, children: [
-        jsx(Input, { value: rejectNote, onChange: (e) => setRejectNote(typeof e === 'string' ? e : e?.target?.value ?? ''), placeholder: 'Why reject?' }),
-        jsx('button', { size: 'sm', onClick: () => { decide('reject'); setRejectOpen(false) }, disabled: busy, children: busy ? 'Working…' : 'Reject' }),
+    !decided ? jsxs('div', { className: `${ID}-actions`, children: [
+      jsx(Button, { size: 'sm', onClick: () => setApproveOpen(true), disabled: busy || decide.isPending, children: (busy || decide.isPending) ? 'Working…' : 'Approve' }),
+      jsx(Button, { size: 'sm', variant: 'ghost', onClick: () => setRejectOpen(v => !v), disabled: busy || decide.isPending, children: 'Reject' }),
+      rejectOpen ? jsxs('div', { className: `${ID}-reasonRow`, children: [
+        jsx(Input, { value: rejectNote, onChange: (e) => setRejectNote(asText(e)), placeholder: 'Why reject? (sent with the decision)', 'aria-label': 'Rejection reason' }),
+        jsx(Button, { size: 'sm', variant: 'outline', onClick: sendReject, disabled: busy || decide.isPending, children: (busy || decide.isPending) ? 'Working…' : 'Send rejection' }),
       ] }) : null,
+      jsx(ConfirmDialog, {
+        open: approveOpen,
+        onClose: () => setApproveOpen(false),
+        title: `Approve “${art.name || title}”?`,
+        description: art.version ? `Version ${art.version}${item.next_action ? ` · next: ${item.next_action}` : ''}` : (item.next_action ? `Next: ${item.next_action}` : 'This records the approval.'),
+        confirmLabel: 'Approve',
+        onConfirm: async () => { decide.mutate({ item, decision: 'approve', note: '' }); setApproveOpen(false) },
+      }),
     ] }) : jsxs('div', { className: `${ID}-actions`, children: [
-      jsx('span', { className: `${ID}-metaRow`, children: [
-        jsx('span', { className: `${ID}-metaLabel`, children: 'Decided' }),
-        jsx('span', { className: `${ID}-metaLabel`, children: decision.decision || '-' }),
-      ] }),
-      decision.note ? jsx('div', { className: `${ID}-note`, children: decision.note }) : null,
+      jsx(StatusBadge, { status: item.status }),
+      decision.note ? jsx('div', { className: `${ID}-note`, style: { flexBasis: '100%' }, children: decision.note }) : null,
       jsx('span', { className: `${ID}-metaRow`, children: [
         jsx('span', { className: `${ID}-metaLabel`, children: 'By' }),
         jsx('span', { children: decision.by || item.originating_agent || '-' }),
@@ -216,10 +252,55 @@ function ItemCard({ item }) {
 // Pane
 // ─────────────────────────────────────────────────────────────────────────
 
+const FILTERS = [
+  { id: 'need', label: 'Needs decision' },
+  { id: 'approved', label: 'Approved' },
+  { id: 'rejected', label: 'Rejected' },
+  { id: 'all', label: 'All' },
+]
+
 function InboxPane() {
   const q = useItems()
+  const decide = useDecide()
   const items = q.data || []
   const error = q.isError ? errText(q.error) : null
+
+  const [prefs, setPrefsRaw] = useState(() => {
+    try { return (storeGet && storeGet('inboxPrefs', {})) || {} } catch { return {} }
+  })
+  const setPrefs = (p) => {
+    setPrefsRaw(p)
+    try { storeSet && storeSet('inboxPrefs', p) } catch { /* prefs are best-effort */ }
+  }
+  const needle = prefs.q || ''
+  const filter = prefs.filter || 'need'
+  const setNeedle = (v) => setPrefs({ ...prefs, q: v })
+  const setFilter = (v) => setPrefs({ ...prefs, filter: v })
+
+  const pending = items.filter(i => i.status === 'pending')
+  const counts = {
+    need: pending.length,
+    approved: items.filter(i => i.status === 'approved').length,
+    rejected: items.filter(i => i.status === 'rejected').length,
+    all: items.length,
+  }
+
+  const byNewest = (a, b) => String(b.ts || '').localeCompare(String(a.ts || ''))
+  let visible = items.filter(i => matches(i, needle)).sort(byNewest)
+  if (filter === 'need') visible = visible.filter(i => i.status === 'pending')
+  if (filter === 'approved') visible = visible.filter(i => i.status === 'approved')
+  if (filter === 'rejected') visible = visible.filter(i => i.status === 'rejected')
+  // Pending always floats above decided when browsing everything.
+  if (filter === 'all') {
+    const rank = (i) => (i.status === 'pending' ? 0 : 1)
+    visible = [...visible].sort((a, b) => rank(a) - rank(b) || byNewest(a, b))
+  }
+
+  const emptyCopy = needle
+    ? { title: 'No matching requests', description: 'Try a different search.' }
+    : filter === 'need'
+      ? { title: 'Nothing waiting', description: 'No approvals need your decision right now.' }
+      : { title: 'Nothing here yet', description: 'Decided requests will appear under their filters.' }
 
   return jsxs('div', { className: `${ID}`, children: [
     /* themed header */
@@ -227,18 +308,45 @@ function InboxPane() {
       jsx('button', { className: `${ID}-brand`, onClick: () => { if (host?.navigate) host.navigate(PAGE_PATH) }, children: [
         jsx('span', { className: `${ID}-title`, children: 'Approval Inbox' }),
       ] }),
-      jsx('span', { className: `${ID}-count`, children: `${items.length} pending` }),
-      jsx('button', { size: 'xs', variant: 'ghost', onClick: () => { queryClient.invalidateQueries({ queryKey: [ID] }) }, disabled: q.isPending, children: 'Refresh' }),
+      jsx(Badge, { variant: 'outline', children: `${pending.length} to review` }),
+      jsx('span', { style: { flex: 1 } }),
+      jsx(SearchField, {
+        value: needle,
+        onChange: (v) => setNeedle(asText(v)),
+        placeholder: 'Search subject, owner, artifact…',
+        'aria-label': 'Search approval requests',
+        containerClassName: 'w-56',
+      }),
+      jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => { queryClient.invalidateQueries({ queryKey: [ID] }) }, disabled: q.isPending, 'aria-label': 'Refresh inbox', children: q.isPending ? 'Refreshing…' : 'Refresh' }),
     ]}),
+
+    /* filter row */
+    jsx('div', { className: `${ID}-filters`, children:
+      jsx(SegmentedControl, {
+        value: filter,
+        onChange: setFilter,
+        options: FILTERS.map(f => ({ id: f.id, label: `${f.label} (${counts[f.id] ?? 0})` })),
+      }),
+    }),
 
     /* scrollable body */
     jsx('div', { className: `${ID}-body`, children: [
-      jsx(ScrollArea, { className: `${ID}-scroll`, children: [
-        q.isLoading && items.length === 0 ? jsx('div', { className: 'grid h-full place-items-center', children: jsx(GlyphSpinner, {}) }) : null,
-        error ? jsx('div', { className: `${ID}-error`, children: error }) : null,
-        items.length === 0 && !q.isLoading && !error ? jsx('div', { className: `${ID}-empty`, children: 'No approvals are waiting for a decision.' }) : null,
-        items.map((it) => jsx(ItemCard, { item: it, key: it.msg_id })),
-      ]}),
+      jsx(ScrollArea, { className: `${ID}-scroll`, children:
+        q.isLoading && items.length === 0
+          ? jsx('div', { className: 'grid h-full place-items-center p-4', children: jsx(GlyphSpinner, {}) })
+          : error
+            ? jsxs('div', { className: 'grid h-full place-items-center gap-2 p-4', children: [
+              jsx(ErrorState, { title: 'Could not load approvals', description: error }),
+              jsx(Button, { size: 'xs', variant: 'outline', onClick: () => { queryClient.invalidateQueries({ queryKey: [ID] }) }, children: 'Retry' }),
+            ] })
+            : visible.length === 0
+              ? jsx('div', { className: 'grid h-full place-items-center p-4', children: jsx(EmptyState, { title: emptyCopy.title, description: emptyCopy.description }) })
+              : jsxs('div', { className: `${ID}-list`, children: [
+                filter === 'all' && pending.length > 0 && counts.approved + counts.rejected > 0
+                  ? jsx('div', { className: `${ID}-section`, children: `Needs decision (${pending.length})` }) : null,
+                ...visible.map((it) => jsx(ItemCard, { item: it, decide, busy: decide.isPending, key: it.msg_id })),
+              ] }),
+      }),
     ]}),
   ] })
 }
@@ -256,6 +364,10 @@ export default {
   register(ctx) {
     ensureStyles()
     rest = ctx.rest
+    if (ctx.storage) {
+      storeGet = (key, fallback) => ctx.storage.get(key, fallback)
+      storeSet = (key, value) => ctx.storage.set(key, value)
+    }
 
     ctx.registerMany([
       {
