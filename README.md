@@ -25,16 +25,33 @@ plugins:
 Restart the desktop serve child so the backend mounts at
 `/api/plugins/approval-inbox/`.
 
-## Inbox UI (0.3.0)
+## Inbox UI (0.4.0)
 
 - Header: title, `N to review` badge, search (subject, owner, artifact),
   refresh.
 - Filter row: Needs decision / Approved / Rejected / All, with counts.
   Search + filter are remembered between visits.
-- Cards: status badge, subject line, owner / work / artifact / next action,
-  preview link. Pending first, newest first; decided cards dim.
+- Cards show the artifact itself: image thumbnails (tap to enlarge),
+  carousel strips, inline video, PDF first page with full-document reader.
+  Pending first, newest first; decided cards dim.
 - Approve asks for confirmation naming the artifact; reject takes a reason
   that travels with the decision. Failures surface as an error toast.
+- Every decision wakes the default agent: approve carries out exactly the
+  next action shown, reject stops it and relays the reason to the owner.
+  The ledger record alone never moves work — the trigger does.
+
+## Submitting with files
+
+`POST /submit` accepts `attachments: [{name, content_type, data_b64}]`
+(images, video, PDF; 15MB each, 30MB total). Stored per request, served via
+`GET /files/{msg_id}/{name}` and previewed via `GET /preview/{msg_id}`
+(data URLs the renderer can use directly).
+
+## CI
+
+`bash tools/ci.sh` — pytest, strict ESM gate
+(`node --input-type=module --check`; plain `--check` is a known false
+clean on ESM), UI smoke tests, plugin validation.
 
 ## Verify
 

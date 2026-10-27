@@ -140,3 +140,88 @@ def test_lint_clean():
     else:
         for path in targets:
             py_compile.compile(path, doraise=True)
+
+
+import base64
+
+PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+MIN_PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
+
+
+def _submit_with_files(c):
+    payload = {
+        "type": "post",
+        "owner": "social_content",
+        "work_id": "t_files1",
+        "artifact": {"name": "launch-post", "version": "v1"},
+        "next_action": "publish post",
+        "attachments": [
+            {"name": "frame1.png", "content_type": "image/png", "data_b64": PNG_1PX},
+            {"name": "brief.pdf", "content_type": "application/pdf",
+             "data_b64": base64.b64encode(MIN_PDF).decode("ascii")},
+        ],
+    }
+    r = c.post("/api/plugins/approval-inbox/submit", json=payload)
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["attachments"]) == 2
+    return body["msg_id"]
+
+
+def test_submit_attachments_visible_in_items(c):
+    msg_id = _submit_with_files(c)
+    r = c.get("/api/plugins/approval-inbox/items?status=pending")
+    it = next(i for i in r.json()["items"] if i["msg_id"] == msg_id)
+    kinds = sorted(a["kind"] for a in it["attachments"])
+    assert kinds == ["image", "pdf"]
+
+
+def test_preview_packet_and_file_bytes(c):
+    msg_id = _submit_with_files(c)
+    r = c.get(f"/api/plugins/approval-inbox/preview/{msg_id}")
+    assert r.status_code == 200
+    items = {i["name"]: i for i in r.json()["items"]}
+    assert items["frame1.png"]["data_url"].startswith("data:image/png;base64,")
+    assert items["brief.pdf"]["kind"] == "pdf"
+    f = c.get(f"/api/plugins/approval-inbox/files/{msg_id}/frame1.png")
+    assert f.status_code == 200
+    assert f.content == base64.b64decode(PNG_1PX)
+    bad = c.get(f"/api/plugins/approval-inbox/files/{msg_id}/..%2Fsecret")
+    assert bad.status_code in (404, 422)
+
+
+def test_bad_attachment_rejected(c):
+    payload = {"type": "post", "owner": "x", "work_id": "t_bad",
+               "artifact": {"name": "a", "version": "v1"},
+               "attachments": [{"name": "run.exe", "content_type": "application/x-msdownload",
+                                "data_b64": base64.b64encode(b"mz").decode("ascii")}]}
+    r = c.post("/api/plugins/approval-inbox/submit", json=payload)
+    assert r.status_code == 400
+
+
+def test_note_capped_at_500(c):
+    payload = {"type": "post", "owner": "x", "work_id": "t_note",
+               "artifact": {"name": "a", "version": "v1"}}
+    r = c.post("/api/plugins/approval-inbox/submit", json=payload)
+    msg_id = r.json()["msg_id"]
+    r2 = c.post("/api/plugins/approval-inbox/decide",
+                json={"msg_id": msg_id, "decision": "reject", "note": "x" * 600})
+    assert r2.status_code == 422
+
+
+def test_decide_reports_trigger_and_actor(c):
+    payload = {"type": "post", "owner": "x", "work_id": "t_trig",
+               "artifact": {"name": "a", "version": "v1"}}
+    r = c.post("/api/plugins/approval-inbox/submit", json=payload)
+    msg_id = r.json()["msg_id"]
+    r2 = c.post("/api/plugins/approval-inbox/decide",
+                json={"msg_id": msg_id, "decision": "reject", "note": "not yet"})
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["actor"] == "default"
+    assert body["actor_source"] == "default"
+    assert body["trigger"]["triggered"] is False
+    r3 = c.get("/api/plugins/approval-inbox/ops/log?limit=10")
+    assert r3.status_code == 200
+    ops = [(e["op"], e["status"]) for e in r3.json()["entries"]]
+    assert ("decide", "reject") in ops

@@ -72,6 +72,16 @@ function ensureStyles() {
     `.${ID}-reasonRow { display: flex; gap: 0.5rem; align-items: center; flex: 1; min-width: 0; flex-basis: 100%; }`,
     `.${ID}-note { font-size: 0.75rem; color: var(--ui-text-secondary); white-space: pre-line; line-height: 1.4; overflow-wrap: anywhere; }`,
     `.${ID}-time { font-size: 0.6875rem; color: var(--ui-text-quaternary); white-space: nowrap; }`,
+    /* attachment previews */
+    `.${ID}-prev { display: flex; flex-direction: column; gap: 0.375rem; margin-top: 0.5rem; }`,
+    `.${ID}-prevGrid { display: flex; gap: 0.375rem; overflow-x: auto; padding-bottom: 0.125rem; }`,
+    `.${ID}-prevThumb { flex: none; width: 4.5rem; height: 4.5rem; object-fit: cover; border-radius: 0.375rem; border: 1px solid var(--ui-stroke-secondary); cursor: zoom-in; background: var(--ui-bg-card); }`,
+    `.${ID}-prevThumb:hover { border-color: var(--ui-accent); }`,
+    `.${ID}-prevFull { width: 100%; max-height: 22rem; object-fit: contain; border-radius: 0.375rem; border: 1px solid var(--ui-stroke-secondary); cursor: zoom-out; background: var(--ui-bg-card); }`,
+    `.${ID}-prevVideo { width: 100%; max-height: 20rem; border-radius: 0.375rem; border: 1px solid var(--ui-stroke-secondary); background: #000; }`,
+    `.${ID}-prevPdf { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; color: var(--ui-text-secondary); }`,
+    `.${ID}-prevDoc { width: 100%; min-height: 20rem; border-radius: 0.375rem; border: 1px solid var(--ui-stroke-secondary); background: var(--ui-bg-card); }`,
+    `.${ID}-prevName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 12rem; }`,
   ].join('\n')
 
   let style = document.getElementById(`${ID}-styles`)
@@ -173,6 +183,26 @@ function useDecide() {
   })
 }
 
+function usePreview(msgId, hasFiles) {
+  return useQuery({
+    queryKey: [ID, 'preview', msgId],
+    queryFn: async () => {
+      const out = await rest(`/preview/${msgId}`)
+      return Array.isArray(out?.items) ? out.items : []
+    },
+    staleTime: 60000,
+    retry: 1,
+    enabled: !!hasFiles,
+  })
+}
+
+function fmtSize(n) {
+  if (!n && n !== 0) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1048576).toFixed(1)} MB`
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Item card
 // ─────────────────────────────────────────────────────────────────────────
@@ -183,6 +213,35 @@ function StatusBadge({ status }) {
   return jsx(Badge, { variant: 'outline', children: [
     jsx('span', { className: `${ID}-dot`, style: { backgroundColor: DOT[status] || DOT.pending } }),
     jsx('span', { children: status }),
+  ] })
+}
+
+function PreviewBlock({ msgId, hasFiles }) {
+  const pv = usePreview(msgId, hasFiles)
+  const [expanded, setExpanded] = useState(null)
+  if (!hasFiles || pv.isLoading || pv.isError) return null
+  const files = pv.data || []
+  if (files.length === 0) return null
+  const images = files.filter(f => f.kind === 'image' && f.data_url)
+  const videos = files.filter(f => f.kind === 'video' && f.data_url)
+  const pdfs = files.filter(f => f.kind === 'pdf')
+  const rest = files.filter(f => !f.data_url && f.kind !== 'pdf')
+  const big = expanded ? files.find(f => f.name === expanded) : null
+  return jsxs('div', { className: `${ID}-prev`, children: [
+    big && big.kind === 'image' ? jsx('img', { className: `${ID}-prevFull`, src: big.data_url, alt: big.name, onClick: () => setExpanded(null) }) : null,
+    images.length > 0 ? jsx('div', { className: `${ID}-prevGrid`, children:
+      images.map(f => jsx('img', { className: `${ID}-prevThumb`, src: f.data_url, alt: f.name, title: `${f.name} · tap to enlarge`, onClick: () => setExpanded(expanded === f.name ? null : f.name), key: f.name }))
+    }) : null,
+    ...videos.map(f => jsx('video', { className: `${ID}-prevVideo`, src: f.data_url, controls: true, preload: 'metadata', key: f.name })),
+    ...pdfs.map(f => jsxs('div', { children: [
+      jsxs('div', { className: `${ID}-prevPdf`, children: [
+        f.thumb_url ? jsx('img', { className: `${ID}-prevThumb`, src: f.thumb_url, alt: `${f.name} first page`, title: `${f.name}${f.pages ? ` · ${f.pages} pages` : ''} · tap to read`, onClick: () => setExpanded(expanded === f.name ? null : f.name) }) : null,
+        jsx('span', { className: `${ID}-prevName`, children: `${f.name}${f.pages ? ` · ${f.pages}p` : ''} · ${fmtSize(f.size)}` }),
+        f.data_url ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Read' }) : null,
+      ] }),
+      expanded === f.name && f.data_url ? jsx('embed', { className: `${ID}-prevDoc`, src: f.data_url, type: 'application/pdf' }) : null,
+    ], key: f.name })),
+    ...rest.map(f => jsx('div', { className: `${ID}-prevPdf`, children: jsx('span', { className: `${ID}-prevName`, children: `${f.name} · ${fmtSize(f.size)} (too large to preview inline)` }), key: f.name })),
   ] })
 }
 
@@ -218,6 +277,7 @@ function ItemCard({ item, decide, busy }) {
       art.name ? jsx('div', { className: `${ID}-metaRow`, children: [jsx('span', { className: `${ID}-metaLabel`, children: 'Artifact' }), jsx('span', { children: `${art.name} v${art.version || '?'}` })] }) : null,
       item.next_action ? jsx('div', { className: `${ID}-metaRow`, children: [jsx('span', { className: `${ID}-metaLabel`, children: 'Next action' }), jsx('span', { children: item.next_action })] }) : null,
       preview ? jsx('a', { href: String(preview), target: '_blank', rel: 'noopener noreferrer', className: `${ID}-preview`, children: 'Open preview' }) : null,
+      (item.attachments && item.attachments.length > 0) ? jsx(PreviewBlock, { msgId: item.msg_id, hasFiles: true }) : null,
     ]}),
 
     /* decision controls */

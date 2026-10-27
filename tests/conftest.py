@@ -17,6 +17,7 @@ os.environ["AGENT_MAIL_HOME"] = MAIL_HOME
 os.environ["AGENT_MAIL_BIN"] = os.path.join(MAIL_HOME, "bin", "agent-mail")
 os.environ["APPROVAL_INBOX_DATA"] = os.path.join(TMP, "plugin-data")
 os.environ["AGENT_MAIL_EXTERNAL_ENABLED"] = "false"
+os.environ["APPROVAL_INBOX_NO_TRIGGER"] = "1"
 
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
