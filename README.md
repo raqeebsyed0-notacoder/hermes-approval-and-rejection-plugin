@@ -45,7 +45,9 @@ Restart the desktop serve child so the backend mounts at
 `POST /submit` accepts `attachments: [{name, content_type, data_b64}]`
 (images, video, PDF; 15MB each, 30MB total). Stored per request, served via
 `GET /files/{msg_id}/{name}` and previewed via `GET /preview/{msg_id}`
-(data URLs the renderer can use directly).
+(data URLs the renderer can use directly). A locally-delivered request
+never fails just because the external email copy fails — the failure is
+returned as a loud `oae_warning`, not a 500.
 
 ## CI
 

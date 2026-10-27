@@ -352,6 +352,17 @@ def submit(payload: SubmitPayload):
         "--recipient-name", "R Hus (Founder)",
     ])
     if rc != 0:
+        # Local delivery may still have succeeded (ledger has the request)
+        # while only the external OAE copy failed. The inbox runs on the
+        # local ledger, so a locally-delivered request must not 500:
+        # store its files, warn loudly, and let the Founder decide.
+        maybe_id = _extract_msg_id(out)
+        if maybe_id and any(r.get("msg_id") == maybe_id for r in _read_jsonl(_ledger_path())):
+            stored = _store_attachments(maybe_id, payload.attachments or [])
+            _oplog("submit", "ok-oae-failed", f"{maybe_id} +{len(stored)} files; {err[:120]}")
+            return {"ok": True, "msg_id": maybe_id, "stdout": out,
+                    "attachments": stored,
+                    "oae_warning": (err or "external copy failed")[:300]}
         _oplog("submit", "failed", err[:200])
         raise HTTPException(status_code=500, detail={"rc": rc, "stderr": err, "stdout": out})
     msg_id = _extract_msg_id(out)

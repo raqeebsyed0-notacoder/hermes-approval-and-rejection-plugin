@@ -225,3 +225,31 @@ def test_decide_reports_trigger_and_actor(c):
     assert r3.status_code == 200
     ops = [(e["op"], e["status"]) for e in r3.json()["entries"]]
     assert ("decide", "reject") in ops
+
+
+def test_submit_survives_oae_failure_when_local_delivered(c, monkeypatch):
+    import dashboard.plugin_api as papi
+
+    fake_id = "m20261027-000001"
+    ledger = os.path.join(os.environ["AGENT_MAIL_HOME"], "ledger.jsonl")
+    with open(ledger, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"msg_id": fake_id, "ts": "2026-10-27 00:00:00 +0300",
+                             "from": "default", "to": ["founder"],
+                             "subject": "OAE resilience probe", "kind": "approval",
+                             "task_id": "t_oae", "body": "<!-- approval-inbox:v1 {} -->",
+                             "delivery": "local"}) + "\n")
+
+    def fake_run(args):
+        return 6, f"delivered  {fake_id}  default \u2192 founder  [local]\nOAE FAIL: down", "!! OAE down"
+
+    monkeypatch.setattr(papi, "_run_agent_mail", fake_run)
+    r = c.post("/api/plugins/approval-inbox/submit",
+               json={"type": "post", "owner": "x", "work_id": "t_oae",
+                     "artifact": {"name": "a", "version": "v1"},
+                     "attachments": [{"name": "frame1.png", "content_type": "image/png",
+                                      "data_b64": PNG_1PX}]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["msg_id"] == fake_id
+    assert "oae_warning" in body
+    assert len(body["attachments"]) == 1
