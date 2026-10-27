@@ -17,7 +17,7 @@
  */
 
 import {
-  Button, EmptyState, ErrorState, GlyphSpinner, host, Input,
+  ErrorState, GlyphSpinner, host, Input,
   ScrollArea, useQuery, queryClient,
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
@@ -191,11 +191,11 @@ function ItemCard({ item }) {
 
     /* decision controls */
     !decided ? jsx('div', { className: `${ID}-actions`, children: [
-      jsx('Button', { size: 'sm', onClick: () => decide('approve'), disabled: busy, children: busy ? 'Working…' : 'Approve' }),
-      jsx('Button', { size: 'sm', variant: 'ghost', onClick: () => setRejectOpen(v => !v), disabled: busy, children: 'Reject' }),
+      jsx('button', { size: 'sm', onClick: () => decide('approve'), disabled: busy, children: busy ? 'Working…' : 'Approve' }),
+      jsx('button', { size: 'sm', variant: 'ghost', onClick: () => setRejectOpen(v => !v), disabled: busy, children: 'Reject' }),
       rejectOpen ? jsx('div', { className: `${ID}-reasonRow`, children: [
-        jsx('Input', { value: rejectNote, onChange: (e) => setRejectNote(typeof e === 'string' ? e : e?.target?.value ?? ''), placeholder: 'Why reject?' }),
-        jsx('Button', { size: 'sm', onClick: () => { decide('reject'); setRejectOpen(false) }, disabled: busy, children: busy ? 'Working…' : 'Reject' }),
+        jsx(Input, { value: rejectNote, onChange: (e) => setRejectNote(typeof e === 'string' ? e : e?.target?.value ?? ''), placeholder: 'Why reject?' }),
+        jsx('button', { size: 'sm', onClick: () => { decide('reject'); setRejectOpen(false) }, disabled: busy, children: busy ? 'Working…' : 'Reject' }),
       ] }) : null,
     ] }) : jsxs('div', { className: `${ID}-actions`, children: [
       jsx('span', { className: `${ID}-metaRow`, children: [
@@ -228,12 +228,12 @@ function InboxPane() {
         jsx('span', { className: `${ID}-title`, children: 'Approval Inbox' }),
       ] }),
       jsx('span', { className: `${ID}-count`, children: `${items.length} pending` }),
-      jsx('Button', { size: 'xs', variant: 'ghost', onClick: () => { queryClient.invalidateQueries({ queryKey: [ID] }) }, disabled: q.isPending, children: 'Refresh' }),
+      jsx('button', { size: 'xs', variant: 'ghost', onClick: () => { queryClient.invalidateQueries({ queryKey: [ID] }) }, disabled: q.isPending, children: 'Refresh' }),
     ]}),
 
     /* scrollable body */
     jsx('div', { className: `${ID}-body`, children: [
-      jsx('ScrollArea', { className: `${ID}-scroll`, children: [
+      jsx(ScrollArea, { className: `${ID}-scroll`, children: [
         q.isLoading && items.length === 0 ? jsx('div', { className: 'grid h-full place-items-center', children: jsx(GlyphSpinner, {}) }) : null,
         error ? jsx('div', { className: `${ID}-error`, children: error }) : null,
         items.length === 0 && !q.isLoading && !error ? jsx('div', { className: `${ID}-empty`, children: 'No approvals are waiting for a decision.' }) : null,
