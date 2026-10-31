@@ -350,3 +350,48 @@ def test_oversize_image_lists_but_does_not_inline(c):
     item = next(i for i in pv["items"] if i["name"] == "huge.png")
     assert item["data_url"] is None
     assert item["size"] == len(big)
+
+
+def test_submit_md_attachment_kinds_and_preview(c):
+    payload = {
+        "type": "post",
+        "owner": "social_content",
+        "work_id": "t_md",
+        "artifact": {"name": "launch-post", "version": "v1"},
+        "next_action": "publish post",
+        "attachments": [
+            {
+                "name": "NOTES.md",
+                "content_type": "text/markdown",
+                "data_b64": base64.b64encode(
+                    b"# Launch notes\n\n- Alpha\n- Beta\n"
+                ).decode("ascii"),
+            }
+        ],
+    }
+    r = c.post("/api/plugins/approval-inbox/submit", json=payload)
+    assert r.status_code == 200, r.text
+    msg_id = r.json()["msg_id"]
+    assert msg_id
+
+    # the attachment lands on disk
+    on_disk = os.path.join(
+        os.environ["APPROVAL_INBOX_DATA"], "files", msg_id, "NOTES.md"
+    )
+    assert os.path.isfile(on_disk), f"attachment not on disk: {on_disk}"
+
+    # GET /items reports attachments[0].kind == "md"
+    r2 = c.get("/api/plugins/approval-inbox/items?status=pending")
+    assert r2.status_code == 200
+    it = next(i for i in r2.json()["items"] if i["msg_id"] == msg_id)
+    assert len(it["attachments"]) == 1
+    assert it["attachments"][0]["kind"] == "md"
+
+    # GET /preview/<msg_id> returns a data_url
+    r3 = c.get(f"/api/plugins/approval-inbox/preview/{msg_id}")
+    assert r3.status_code == 200
+    items = {i["name"]: i for i in r3.json()["items"]}
+    assert "NOTES.md" in items
+    assert items["NOTES.md"]["data_url"].startswith("data:text/markdown;base64,")
+
+

@@ -130,7 +130,17 @@ def _within(base, path):
 
 
 def _sniff(content_type, raw):
-    """Magic-byte check so the label matches the bytes, not just the name."""
+    """Magic-byte check so the label matches the bytes, not just the name.
+
+    Strict detectors are kept for images, video and PDF (unchanged):
+    png/jpeg/gif are identified by header bytes, mp4/webm by an ftyp box,
+    and pdf by the %PDF- magic. Those checks are deliberately not touched.
+
+    text/markdown and text/html are NOT magic-byte gated: a document is
+    identified by its payload being valid UTF-8, not by a header. Payloads
+    that fail UTF-8 decoding, or that carry NUL bytes (an obvious binary
+    signature), are rejected for text types.
+    """
     if content_type == "image/png":
         return raw[:8] == b"\x89PNG\r\n\x1a\n"
     if content_type in ("image/jpeg",):
@@ -143,6 +153,14 @@ def _sniff(content_type, raw):
         return len(raw) >= 12 and (raw[4:8] == b"ftyp" or raw[:4] == b"\x1a\x45\xdf\xa3")
     if content_type == "application/pdf":
         return raw[:5] == b"%PDF-"
+    if content_type in ("text/markdown", "text/html"):
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        # A text document cannot contain NUL bytes; their presence is an
+        # obvious binary signature.
+        return b"\x00" not in raw
     return False
 
 
