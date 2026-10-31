@@ -20,6 +20,7 @@ AGENT_MAIL = os.environ.get("AGENT_MAIL_BIN", os.path.join(MAIL_HOME, "bin", "ag
 DATA_DIR = os.environ.get("APPROVAL_INBOX_DATA", os.path.join(REPO, "work", "approval-inbox"))
 VERSIONS_FILE = os.path.join(DATA_DIR, "approved_versions.jsonl")
 FILES_DIR = os.path.join(DATA_DIR, "files")
+SPEND_REGISTER = os.path.join(REPO, "work", "finance", "spend-register.jsonl")
 HERMES_HOME = os.environ.get("HERMES_HOME", "/home/euphoria/euphoria-v2/.hermes")
 TRIGGER_BOARD = os.environ.get("APPROVAL_INBOX_BOARD", "default")
 
@@ -28,19 +29,31 @@ ALLOWED_TYPES = {
     "image/png", "image/jpeg", "image/webp", "image/gif",
     "video/mp4", "video/webm",
     "application/pdf",
+    "text/markdown", "text/html",
 }
 MAX_FILE_BYTES = 15 * 1024 * 1024
 MAX_TOTAL_BYTES = 30 * 1024 * 1024
 MAX_INLINE_BYTES = 8 * 1024 * 1024
 MAX_VIDEO_INLINE_BYTES = 20 * 1024 * 1024
 
-# Bounded in-memory ops log: writes and errors only, never reads.
-OPLOG: deque = deque(maxlen=200)
+# Durable ops log: append-only file in DATA_DIR, plus bounded in-memory cache.
+OPLOG_PATH = os.path.join(DATA_DIR, "ops.log")
+_OPLOG_INMEM: deque = deque(maxlen=200)
 
 
 def _oplog(op, status, detail=""):
-    OPLOG.append({"ts": datetime.now(timezone.utc).isoformat(),
-                  "op": op, "status": status, "detail": (detail or "")[:300]})
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "op": op,
+        "status": status,
+        "detail": (detail or "")[:300],
+    }
+    _OPLOG_INMEM.append(entry)
+    try:
+        with open(OPLOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def _safe_name(name):
@@ -56,6 +69,10 @@ def _kind_of(content_type):
         return "video"
     if content_type == "application/pdf":
         return "pdf"
+    if content_type in ("text/markdown",):
+        return "md"
+    if content_type in ("text/html",):
+        return "html"
     return "file"
 
 router = APIRouter()
@@ -162,6 +179,10 @@ def _guess_type(name):
         return "video/webm"
     if low.endswith(".pdf"):
         return "application/pdf"
+    if low.endswith(".md"):
+        return "text/markdown"
+    if low.endswith(".html"):
+        return "text/html"
     return "application/octet-stream"
 
 
@@ -393,6 +414,7 @@ class SubmitPayload(BaseModel):
     preview_url: Optional[str] = None
     next_action: str = "approve"
     attachments: list = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
 
 
 @router.get("/health")
@@ -471,7 +493,29 @@ class DecidePayload(BaseModel):
 @router.get("/ops/log")
 def ops_log(limit: int = Query(50, le=200)):
     """Most recent write/error entries. Reads are never logged (noise)."""
-    return {"entries": list(OPLOG)[-limit:], "n": len(OPLOG)}
+    entries = []
+    # Load durable disk log first
+    try:
+        if os.path.exists(OPLOG_PATH):
+            with open(OPLOG_PATH, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entries.append(json.loads(line))
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+    # Append in-memory entries (may overlap disk; dedupe by ts+op+detail)
+    seen = {(e.get("ts"), e.get("op"), e.get("detail")) for e in entries}
+    for e in _OPLOG_INMEM:
+        key = (e.get("ts"), e.get("op"), e.get("detail"))
+        if key not in seen:
+            entries.append(e)
+            seen.add(key)
+    return {"entries": entries[-limit:], "n": len(entries)}
 
 
 @router.get("/files/{msg_id}/{name}")
@@ -566,6 +610,46 @@ def decide(payload: DecidePayload, request: Request):
         }
         with open(VERSIONS_FILE, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        # spend register: write spend entry when metadata.spend_usd is present
+        spend_usd = (req.get("metadata") or {}).get("spend_usd")
+        if spend_usd is not None:
+            try:
+                os.makedirs(os.path.dirname(SPEND_REGISTER), exist_ok=True)
+                month = datetime.now(timezone.utc).strftime("%Y-%m")
+                # read current balance for the month
+                balance = 0.0
+                if os.path.exists(SPEND_REGISTER):
+                    with open(SPEND_REGISTER, "r", encoding="utf-8") as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            row = json.loads(line)
+                            if row.get("month") == month and row.get("entry_type") in ("spend", "refund", "adjustment", "ceiling_update"):
+                                if row.get("entry_type") == "ceiling_update":
+                                    balance = float(row.get("balance_usd", 0.0))
+                                else:
+                                    balance += float(row.get("amount_usd", 0.0))
+                amount = float(spend_usd)
+                spend_rec = {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "entry_type": "spend",
+                    "month": month,
+                    "amount_usd": amount,
+                    "balance_usd": round(balance + amount, 4),
+                    "ceiling_usd": 22.0,
+                    "description": f"Approved spend via {req.get('next_action') or req.get('work_id')}",
+                    "vendor": (req.get("artifact") or {}).get("name"),
+                    "approval_refs": [payload.msg_id, req.get("work_id")],
+                    "evidence_paths": [],
+                    "actor": actor,
+                    "note": f"Auto-recorded from approval {payload.msg_id}",
+                }
+                with open(SPEND_REGISTER, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(spend_rec, ensure_ascii=False) + "\n")
+                _oplog("decide", "spend-register", f"{payload.msg_id} ${amount:.2f}")
+            except Exception as exc:  # pragma: no cover - never block approval on ledger failure
+                _oplog("decide", "spend-register-failed", str(exc)[:200])
     # Wake the default agent with the verdict — the decision must travel,
     # not just sit in the ledger. A trigger failure never voids the decision.
     trigger = _trigger_default(payload.decision, req, payload.note, actor)
