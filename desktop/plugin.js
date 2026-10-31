@@ -566,6 +566,8 @@ function FullscreenModal({ file, onClose }) {
         file.kind === 'image' ? jsx('img', { src: file.data_url, style: { maxHeight: '80vh', maxWidth: '100%', objectFit: 'contain' } })
         : file.kind === 'video' ? jsx('video', { src: file.data_url, controls: true, style: { maxHeight: '80vh', maxWidth: '100%' } })
         : file.kind === 'pdf' ? jsx('embed', { src: file.data_url, type: 'application/pdf', style: { width: '100%', height: '70vh' } })
+        : file.kind === 'md' ? jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(file.data_url)) } })
+        : file.kind === 'html' ? jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: decodeDataUrl(file.data_url) } })
         : jsx('div', { children: 'Full preview not available for this file type.' })
       }),
     ]}),
