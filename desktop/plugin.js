@@ -291,7 +291,7 @@ function StatusBadge({ status }) {
   ] })
 }
 
-function PreviewBlock({ msgId, hasFiles }) {
+function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
   const pv = usePreview(msgId, hasFiles)
   const [expanded, setExpanded] = useState(null)
   if (!hasFiles || pv.isLoading) return null
@@ -332,7 +332,7 @@ function PreviewBlock({ msgId, hasFiles }) {
     ...mds.map(f => jsxs('div', { className: `${ID}-prevDoc`, children: [
       jsxs('div', { className: `${ID}-viewportToolbar`, children: [
         jsx('span', { className: `${ID}-viewportLabel`, children: 'MARKDOWN' }),
-        jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Fullscreen' }),
+        jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => { if (expanded === f.name) { setExpanded(null); } else { onFullscreen(f); } }, children: expanded === f.name ? 'Close' : 'Fullscreen' }),
       ] }),
       expanded === f.name
         ? jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(f.data_url)) } })
@@ -341,7 +341,7 @@ function PreviewBlock({ msgId, hasFiles }) {
     ...htmls.map(f => jsxs('div', { className: `${ID}-prevDoc`, children: [
       jsxs('div', { className: `${ID}-viewportToolbar`, children: [
         jsx('span', { className: `${ID}-viewportLabel`, children: 'HTML' }),
-        jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Fullscreen' }),
+        jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => { if (expanded === f.name) { setExpanded(null); } else { onFullscreen(f); } }, children: expanded === f.name ? 'Close' : 'Fullscreen' }),
       ] }),
       expanded === f.name
         ? jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: decodeDataUrl(f.data_url) } })
@@ -486,7 +486,7 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
           jsxs('h3', { children: ['Context: ', itemTitle(item)] }),
           renderSimpleMd(item.next_action || ''),
         ]}) : null,
-        hasFiles ? jsx('div', { style: { marginTop: '1rem', width: '100%' }, children: jsx(PreviewBlock, { msgId, hasFiles: true }) }) : null,
+        hasFiles ? jsx('div', { style: { marginTop: '1rem', width: '100%' }, children: jsx(PreviewBlock, { msgId, hasFiles: true, onFullscreen }) }) : null,
       ] })
     )}),
   ] })
