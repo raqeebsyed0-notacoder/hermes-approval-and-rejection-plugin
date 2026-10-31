@@ -1,5 +1,5 @@
 name: approval-inbox
-version: 0.4.5
+version: 0.4.6
 description: "Hermes Desktop approval inbox: one surface for approval requests routed through the default agent."
 author: euphoria
 kind: standalone
