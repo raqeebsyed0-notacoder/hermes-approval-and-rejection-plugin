@@ -5,6 +5,12 @@
  * Retry-Studio / Audit-Trail panel. Reuses proven data hooks and UI
  * components. No external AI calls, no external image URLs, no demo data.
  *
+ * Styling is native: every colour resolves to one of the Desktop's own
+ * `--ui-*` theme custom properties, every action is an SDK `Button` /
+ * `SegmentedControl` / `ConfirmDialog`, and the layout uses the same class
+ * utilities the app's bundled panels use. No injected stylesheet, no literal
+ * colour, so the surface follows the app's light/dark themes for free.
+ *
  * Backend: dashboard/plugin_api.py at /api/plugins/approval-inbox/.
  */
 
@@ -19,108 +25,47 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.4.9'
+const APP_VERSION = '0.5.0'
 
 let rest = null
 let storeGet = null
 let storeSet = null
 
-function ensureStyles() {
-  const css = [
-    `.${ID} { display:flex; flex-direction:column; height:100%; min-height:0; color:var(--ui-text-primary); }`,
-    `.${ID}-header { display:flex; align-items:center; gap:0.5rem; padding:0.5rem 0.75rem; border-bottom:1px solid var(--ui-stroke-secondary); flex:none; flex-wrap:wrap; }`,
-    `.${ID}-brand { display:inline-flex; align-items:center; gap:0.375rem; flex:none; cursor:pointer; padding:0; border:0; background:none; font:inherit; color:var(--ui-text-primary); font-weight:600; font-size:0.875rem; }`,
-    `.${ID}-brand:hover { background:var(--chrome-action-hover); }`,
-    `.${ID}-brand:focus-visible { outline:1px solid var(--ui-accent); outline-offset:-1px; }`,
-    `.${ID}-metrics { display:flex; gap:0.375rem; flex-wrap:wrap; }`,
-    `.${ID}-metric { display:inline-flex; align-items:center; gap:0.25rem; padding:0.25rem 0.5rem; border-radius:0.375rem; font-size:0.75rem; font-weight:600; background:var(--ui-bg-card); border:1px solid var(--ui-stroke-secondary); }`,
-    `.${ID}-metricDot { width:0.5rem; height:0.5rem; border-radius:999px; }`,
-    `.${ID}-spacer { flex:1; }`,
-    `.${ID}-body { flex:1 1 auto; min-height:0; display:flex; min-height:0; }`,
-    `.${ID}-feed { width:22rem; min-width:16rem; border-right:1px solid var(--ui-stroke-secondary); display:flex; flex-direction:column; min-height:0; background:var(--ui-bg-card); }`,
-    `.${ID}-feedHead { padding:0.5rem; border-bottom:1px solid var(--ui-stroke-secondary); display:flex; flex-direction:column; gap:0.5rem; flex:none; }`,
-    `.${ID}-searchWrap { position:relative; display:flex; align-items:center; }`,
-    `.${ID}-searchIcon { position:absolute; left:0.5rem; color:var(--ui-text-quaternary); pointer-events:none; font-size:0.75rem; }`,
-    `.${ID}-searchField { flex:1; }`,
-    `.${ID}-filterRow { display:flex; gap:0.25rem; overflow-x:auto; }`,
-    `.${ID}-filterChip { padding:0.25rem 0.5rem; border-radius:0.375rem; font-size:0.75rem; font-weight:600; border:1px solid var(--ui-stroke-secondary); background:var(--ui-bg-card); color:var(--ui-text-secondary); cursor:pointer; white-space:nowrap; }`,
-    `.${ID}-filterChip:hover { border-color:var(--ui-accent); color:var(--ui-text-primary); }`,
-    `.${ID}-filterChipActive { background:var(--ui-accent); color:#fff; border-color:var(--ui-accent); }`,
-    `.${ID}-feedScroll { flex:1 1 auto; overflow:auto; }`,
-    `.${ID}-feedList { display:flex; flex-direction:column; gap:0.25rem; padding:0.5rem; }`,
-    `.${ID}-row { display:flex; gap:0.5rem; padding:0.625rem 0.5rem; border-radius:0.5rem; cursor:pointer; border:1px solid transparent; transition:background 0.1s, border-color 0.1s; }`,
-    `.${ID}-row:hover { background:var(--ui-bg-hover); }`,
-    `.${ID}-rowSelected { background:var(--ui-accent-muted); border-color:var(--ui-accent); }`,
-    `.${ID}-rowDecided { opacity:0.75; }`,
-    `.${ID}-rowIcon { width:2rem; height:2rem; border-radius:0.375rem; display:flex; align-items:center; justify-content:center; font-size:0.625rem; font-weight:700; flex:none; border:1px solid var(--ui-stroke-secondary); background:var(--ui-bg-card); color:var(--ui-text-secondary); }`,
-    `.${ID}-rowBody { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:0.25rem; }`,
-    `.${ID}-rowHead { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; }`,
-    `.${ID}-rowTitle { font-weight:600; font-size:0.8125rem; line-height:1.35; overflow-wrap:anywhere; }`,
-    `.${ID}-rowTime { font-size:0.6875rem; color:var(--ui-text-quaternary); white-space:nowrap; }`,
-    `.${ID}-rowFoot { display:flex; align-items:center; gap:0.5rem; }`,
-    `.${ID}-rowVer { font-size:0.6875rem; font-weight:700; color:var(--ui-text-quaternary); background:var(--ui-bg-hover); padding:0.125rem 0.375rem; border-radius:0.25rem; }`,
-    `.${ID}-workspace { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; min-height:0; background:var(--ui-bg-base); }`,
-    `.${ID}-inspector { display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.625rem 0.875rem; border-bottom:1px solid var(--ui-stroke-secondary); flex:none; flex-wrap:wrap; background:var(--ui-bg-card); }`,
-    `.${ID}-inspectorLeft { display:flex; align-items:center; gap:0.5rem; min-width:0; flex:1; }`,
-    `.${ID}-typeBadge { padding:0.125rem 0.5rem; border-radius:0.25rem; font-size:0.625rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; border:1px solid var(--ui-stroke-secondary); color:var(--ui-text-primary); }`,
-    `.${ID}-inspectorTitle { font-weight:600; font-size:0.875rem; line-height:1.3; overflow-wrap:anywhere; }`,
-    `.${ID}-inspectorMeta { font-size:0.75rem; color:var(--ui-text-secondary); margin-top:0.125rem; }`,
-    `.${ID}-toolbar { display:flex; align-items:center; gap:0.5rem; padding:0.5rem 0.875rem; border-bottom:1px solid var(--ui-stroke-tertiary); flex:none; background:var(--ui-bg-card); flex-wrap:wrap; }`,
-    `.${ID}-preview { flex:1 1 auto; overflow:auto; padding:1rem; display:flex; flex-direction:column; align-items:center; }`,
-    `.${ID}-viewport { width:100%; max-width:56rem; background:var(--ui-bg-card); border-radius:0.5rem; border:1px solid var(--ui-stroke-secondary); padding:1rem; overflow:auto; }`,
-    `.${ID}-viewportToolbar { display:flex; align-items:center; justify-content:space-between; padding-bottom:0.5rem; margin-bottom:0.75rem; border-bottom:1px solid var(--ui-stroke-tertiary); }`,
-    `.${ID}-viewportLabel { font-size:0.75rem; font-weight:600; color:var(--ui-text-quaternary); text-transform:uppercase; letter-spacing:0.04em; }`,
-    `.${ID}-zoomControls { display:flex; gap:0.25rem; }`,
-    `.${ID}-zoomBtn { padding:0.25rem 0.5rem; border-radius:0.25rem; font-size:0.75rem; font-weight:600; border:1px solid var(--ui-stroke-secondary); background:var(--ui-bg-hover); color:var(--ui-text-secondary); cursor:pointer; }`,
-    `.${ID}-zoomBtn:hover { border-color:var(--ui-accent); color:var(--ui-text-primary); }`,
-    `.${ID}-panel { width:22rem; min-width:18rem; border-left:1px solid var(--ui-stroke-secondary); display:flex; flex-direction:column; min-height:0; background:var(--ui-bg-card); }`,
-    `.${ID}-panelTabs { display:flex; border-bottom:1px solid var(--ui-stroke-secondary); flex:none; }`,
-    `.${ID}-panelTab { flex:1; padding:0.625rem; text-align:center; font-size:0.75rem; font-weight:600; cursor:pointer; border:none; border-bottom:2px solid transparent; color:var(--ui-text-secondary); transition:color 0.1s, border-color 0.1s; background:none; }`,
-    `.${ID}-panelTab:hover { color:var(--ui-text-primary); }`,
-    `.${ID}-panelTabActive { color:var(--ui-accent); border-bottom-color:var(--ui-accent); }`,
-    `.${ID}-panelBody { flex:1 1 auto; overflow:auto; padding:0.75rem; }`,
-    `.${ID}-retryLabel { font-size:0.75rem; font-weight:700; color:var(--ui-text-primary); margin-bottom:0.25rem; }`,
-    `.${ID}-retryHint { font-size:0.6875rem; color:var(--ui-text-quaternary); margin-bottom:0.5rem; }`,
-    `.${ID}-chipRow { display:flex; flex-wrap:wrap; gap:0.25rem; margin-bottom:0.5rem; }`,
-    `.${ID}-chip { padding:0.25rem 0.5rem; border-radius:0.375rem; font-size:0.6875rem; font-weight:600; border:1px solid var(--ui-stroke-secondary); background:var(--ui-bg-hover); color:var(--ui-text-secondary); cursor:pointer; }`,
-    `.${ID}-chip:hover { border-color:var(--ui-accent); color:var(--ui-text-primary); }`,
-    `.${ID}-retryTextarea { width:100%; min-height:6rem; padding:0.5rem; border-radius:0.375rem; border:1px solid var(--ui-stroke-secondary); background:var(--ui-bg-base); color:var(--ui-text-primary); font:inherit; font-size:0.8125rem; resize:vertical; }`,
-    `.${ID}-retryTextarea:focus { outline:none; border-color:var(--ui-accent); }`,
-    `.${ID}-nextVer { font-size:0.6875rem; font-weight:700; color:var(--ui-accent); background:var(--ui-accent-muted); padding:0.125rem 0.5rem; border-radius:999px; }`,
-    `.${ID}-submitBtn { width:100%; padding:0.625rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:700; border:none; cursor:pointer; background:var(--ui-accent); color:#fff; }`,
-    `.${ID}-submitBtn:hover:not(:disabled) { filter:brightness(1.1); }`,
-    `.${ID}-submitBtn:disabled { opacity:0.6; cursor:not-allowed; }`,
-    `.${ID}-timeline { display:flex; flex-direction:column; }`,
-    `.${ID}-timelineItem { position:relative; padding-left:1.25rem; padding-bottom:0.75rem; border-left:2px solid var(--ui-stroke-secondary); }`,
-    `.${ID}-timelineItem:last-child { border-left-color:transparent; padding-bottom:0; }`,
-    `.${ID}-timelineDot { position:absolute; left:-0.375rem; top:0.25rem; width:0.5rem; height:0.5rem; border-radius:999px; background:var(--ui-accent); }`,
-    `.${ID}-timelineDotPast { background:var(--ui-text-quaternary); }`,
-    `.${ID}-timelineAction { font-size:0.75rem; font-weight:600; color:var(--ui-text-primary); }`,
-    `.${ID}-timelineTime { font-size:0.6875rem; color:var(--ui-text-quaternary); margin-left:0.375rem; }`,
-    `.${ID}-timelineNote { font-size:0.75rem; color:var(--ui-text-secondary); margin-top:0.125rem; line-height:1.4; }`,
-    `.${ID}-timelineActor { font-size:0.6875rem; color:var(--ui-text-quaternary); margin-top:0.125rem; }`,
-    `.${ID}-fullscreen { position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:50; display:flex; align-items:center; justify-content:center; padding:1.5rem; }`,
-    `.${ID}-fullscreenInner { position:relative; width:100%; max-width:72rem; max-height:90vh; background:var(--ui-bg-card); border-radius:0.5rem; border:1px solid var(--ui-stroke-secondary); display:flex; flex-direction:column; overflow:hidden; }`,
-    `.${ID}-fullscreenHead { display:flex; align-items:center; justify-content:space-between; padding:0.75rem 1rem; border-bottom:1px solid var(--ui-stroke-secondary); }`,
-    `.${ID}-fullscreenTitle { font-size:0.875rem; font-weight:600; color:var(--ui-text-primary); }`,
-    `.${ID}-fullscreenClose { padding:0.25rem 0.5rem; border-radius:0.25rem; border:1px solid var(--ui-stroke-secondary); background:var(--ui-bg-hover); color:var(--ui-text-secondary); cursor:pointer; font-size:0.75rem; }`,
-    `.${ID}-fullscreenBody { flex:1 1 auto; overflow:auto; display:flex; align-items:center; justify-content:center; padding:1rem; }`,
-    `.${ID}-empty { text-align:center; padding:2.5rem; max-width:20rem; border:1px dashed var(--ui-stroke-secondary); border-radius:0.75rem; background:var(--ui-bg-card); }`,
-    `.${ID}-emptyIcon { display:inline-flex; align-items:center; justify-content:center; width:2.5rem; height:2.5rem; border-radius:0.5rem; margin-bottom:0.75rem; background:var(--ui-accent-muted); color:var(--ui-accent); font-size:1.25rem; }`,
-    `.${ID}-emptyTitle { font-size:0.875rem; font-weight:700; color:var(--ui-text-primary); }`,
-    `.${ID}-emptyDesc { font-size:0.75rem; color:var(--ui-text-secondary); margin-top:0.25rem; }`,
-    `.${ID}-reasonRow { display:flex; gap:0.5rem; align-items:center; flex:1; min-width:0; flex-basis:100%; }`,
-  ].join('\n')
+// Theme tokens defined by the Desktop stylesheet. The app's own panels colour
+// themselves with these; using them here keeps the inbox in theme (light and
+// dark) instead of pinned to a literal.
+const T = {
+  accent: 'var(--ui-accent)',
+  accent2: 'var(--ui-accent-secondary)',
+  red: 'var(--ui-red)',
+  orange: 'var(--ui-orange)',
+  yellow: 'var(--ui-yellow)',
+  green: 'var(--ui-green)',
+  purple: 'var(--ui-purple)',
+  blue: 'var(--ui-blue)',
+  cyan: 'var(--ui-cyan)',
+  base: 'var(--ui-bg-primary)',
+  past: 'var(--ui-text-quaternary)',
+}
 
-  let style = document.getElementById(`${ID}-styles`)
-  if (!style) {
-    style = document.createElement('style')
-    style.id = `${ID}-styles`
-    document.head.appendChild(style)
-  }
-  if (style.textContent !== css) {
-    style.textContent = css
-  }
+// Tints are derived from the token itself (no second literal, no opacity hack).
+function tint(token, pct) {
+  return `color-mix(in srgb, ${token} ${pct}%, transparent)`
+}
+
+const TYPE_TOKEN = {
+  post: T.accent, task: T.accent, reel: T.red, pdf: T.orange,
+  artifact: T.accent, md: T.purple, excel: T.green, mp4: T.red,
+  png: T.blue, jpg: T.cyan,
+}
+
+function typeToken(type) {
+  return TYPE_TOKEN[(type || 'artifact').toLowerCase()] || T.accent
+}
+
+function typeStyle(type) {
+  const c = typeToken(type)
+  return { color: c, backgroundColor: tint(c, 14), borderColor: tint(c, 38) }
 }
 
 function relTime(iso) {
@@ -204,20 +149,23 @@ function getTypeLabel(type) {
   return map[t] || (t.length <= 4 ? t.toUpperCase() : t.charAt(0).toUpperCase() + t.slice(1))
 }
 
-function getTypeColor(type) {
-  const t = (type || 'artifact').toLowerCase()
-  const map = { post: '#6366f1', task: '#6366f1', reel: '#e11d48', pdf: '#d97706', artifact: '#6366f1', md: '#9333ea', excel: '#059669', mp4: '#e11d48', png: '#2563eb', jpg: '#2563eb' }
-  return map[t] || '#6366f1'
-}
-
 function showToast(message, kind = 'info') {
   host?.notify?.({ kind, message })
 }
 
-function metricChip(label, count, color) {
-  return jsxs('span', { className: `${ID}-metric`, children: [
-    jsx('span', { className: `${ID}-metricDot`, style: { backgroundColor: color } }),
+const DOT = { pending: T.yellow, approved: T.green, rejected: T.red }
+
+function metricChip(label, count, token) {
+  return jsxs(Badge, { variant: 'outline', children: [
+    jsx('span', { className: 'size-2 shrink-0 rounded-full', style: { backgroundColor: token } }),
     jsxs('span', { children: [label, ': ', String(count)] }),
+  ] })
+}
+
+function StatusBadge({ status }) {
+  return jsxs(Badge, { variant: 'outline', children: [
+    jsx('span', { className: 'size-2 shrink-0 rounded-full', style: { backgroundColor: DOT[status] || DOT.pending } }),
+    jsx('span', { children: status }),
   ] })
 }
 
@@ -282,14 +230,7 @@ function fmtSize(n) {
   return `${(n / 1048576).toFixed(1)} MB`
 }
 
-const DOT = { pending: '#b45309', approved: '#047857', rejected: '#b91c1c' }
-
-function StatusBadge({ status }) {
-  return jsx(Badge, { variant: 'outline', children: [
-    jsx('span', { className: `${ID}-dot`, style: { backgroundColor: DOT[status] || DOT.pending } }),
-    jsx('span', { children: status }),
-  ] })
-}
+const VIEWPORT = 'w-full max-w-full overflow-auto rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-tertiary) p-4'
 
 function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
   const pv = usePreview(msgId, hasFiles)
@@ -298,11 +239,10 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
   if (pv.isError) {
     const status = pv.error && (pv.error.status || pv.error.statusCode)
     const oldBackend = status === 404
-    return jsxs('div', { className: `${ID}-prev`, children: [
-      jsx('div', { className: `${ID}-prevPdf`, children:
-        jsx('span', { className: `${ID}-note`, children: oldBackend
+    return jsxs('div', { className: 'flex flex-col items-start gap-2 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-tertiary) p-2', children: [
+      jsx('span', { className: 'text-xs text-(--ui-text-secondary)', children: oldBackend
           ? 'Preview needs the new backend — fully quit and reopen your Desktop app, then come back.'
-          : 'Could not load the preview.' }) }),
+          : 'Could not load the preview.' }),
       jsx(Button, { size: 'xs', variant: 'outline', onClick: () => pv.refetch(), children: 'Retry preview' }),
     ] })
   }
@@ -315,39 +255,39 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
   const htmls = files.filter(f => f.kind === 'html' && f.data_url)
   const rest = files.filter(f => !f.data_url && !['pdf', 'md', 'html'].includes(f.kind))
   const big = expanded ? files.find(f => f.name === expanded) : null
-  return jsxs('div', { className: `${ID}-prev`, children: [
-    big && big.kind === 'image' ? jsx('img', { className: `${ID}-prevFull`, src: big.data_url, alt: big.name, onClick: () => setExpanded(null) }) : null,
-    images.length > 0 ? jsx('div', { className: `${ID}-prevGrid`, children:
-      images.map(f => jsx('img', { className: `${ID}-prevThumb`, src: f.data_url, alt: f.name, title: `${f.name} · tap to enlarge`, onClick: () => setExpanded(expanded === f.name ? null : f.name), key: f.name }))
+  return jsxs('div', { className: 'flex w-full flex-col gap-3', children: [
+    big && big.kind === 'image' ? jsx('img', { className: 'w-full cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: big.data_url, alt: big.name, onClick: () => setExpanded(null) }) : null,
+    images.length > 0 ? jsx('div', { className: 'flex flex-wrap gap-2', children:
+      images.map(f => jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: f.data_url, alt: f.name, title: `${f.name} · tap to enlarge`, onClick: () => setExpanded(expanded === f.name ? null : f.name), key: f.name }))
     }) : null,
-    ...videos.map(f => jsx('video', { className: `${ID}-prevVideo`, src: f.data_url, controls: true, preload: 'metadata', key: f.name })),
-    ...pdfs.map(f => jsxs('div', { children: [
-      jsxs('div', { className: `${ID}-prevPdf`, children: [
-        f.thumb_url ? jsx('img', { className: `${ID}-prevThumb`, src: f.thumb_url, alt: `${f.name} first page`, title: `${f.name}${f.pages ? ` · ${f.pages} pages` : ''} · tap to read`, onClick: () => setExpanded(expanded === f.name ? null : f.name) }) : null,
-        jsx('span', { className: `${ID}-prevName`, children: `${f.name}${f.pages ? ` · ${f.pages}p` : ''} · ${fmtSize(f.size)}` }),
+    ...videos.map(f => jsx('video', { className: 'w-full rounded-md border border-(--ui-stroke-secondary)', src: f.data_url, controls: true, preload: 'metadata', key: f.name })),
+    ...pdfs.map(f => jsxs('div', { className: 'flex flex-col gap-2 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary) p-2', children: [
+      jsxs('div', { className: 'flex items-center gap-2', children: [
+        f.thumb_url ? jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: f.thumb_url, alt: `${f.name} first page`, title: `${f.name}${f.pages ? ` · ${f.pages} pages` : ''} · tap to read`, onClick: () => setExpanded(expanded === f.name ? null : f.name) }) : null,
+        jsx('span', { className: 'min-w-0 flex-1 break-all text-xs text-(--ui-text-secondary)', children: `${f.name}${f.pages ? ` · ${f.pages}p` : ''} · ${fmtSize(f.size)}` }),
         f.data_url ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Read' }) : null,
       ] }),
-      expanded === f.name && f.data_url ? jsx('embed', { className: `${ID}-prevDoc`, src: f.data_url, type: 'application/pdf' }) : null,
+      expanded === f.name && f.data_url ? jsx('embed', { className: 'w-full rounded-sm border border-(--ui-stroke-tertiary)', style: { height: '24rem' }, src: f.data_url, type: 'application/pdf' }) : null,
     ], key: f.name })),
-    ...mds.map(f => jsxs('div', { className: `${ID}-prevDoc`, children: [
-      jsxs('div', { className: `${ID}-viewportToolbar`, children: [
-        jsx('span', { className: `${ID}-viewportLabel`, children: 'MARKDOWN' }),
+    ...mds.map(f => jsxs('div', { className: 'w-full overflow-hidden rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary)', children: [
+      jsxs('div', { className: 'flex items-center justify-between gap-2 border-b border-(--ui-stroke-tertiary) px-2 py-1', children: [
+        jsx('span', { className: 'text-xs font-semibold tracking-wide uppercase text-(--ui-text-quaternary)', children: 'MARKDOWN' }),
         jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => { if (expanded === f.name) { setExpanded(null); } else { onFullscreen(f); } }, children: expanded === f.name ? 'Close' : 'Fullscreen' }),
       ] }),
       expanded === f.name
-        ? jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(f.data_url)) } })
-        : jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(f.data_url)) } })
+        ? jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(f.data_url)) } })
+        : jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(f.data_url)) } })
     ], key: f.name })),
-    ...htmls.map(f => jsxs('div', { className: `${ID}-prevDoc`, children: [
-      jsxs('div', { className: `${ID}-viewportToolbar`, children: [
-        jsx('span', { className: `${ID}-viewportLabel`, children: 'HTML' }),
+    ...htmls.map(f => jsxs('div', { className: 'w-full overflow-hidden rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary)', children: [
+      jsxs('div', { className: 'flex items-center justify-between gap-2 border-b border-(--ui-stroke-tertiary) px-2 py-1', children: [
+        jsx('span', { className: 'text-xs font-semibold tracking-wide uppercase text-(--ui-text-quaternary)', children: 'HTML' }),
         jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => { if (expanded === f.name) { setExpanded(null); } else { onFullscreen(f); } }, children: expanded === f.name ? 'Close' : 'Fullscreen' }),
       ] }),
       expanded === f.name
-        ? jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: decodeDataUrl(f.data_url) } })
-        : jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: decodeDataUrl(f.data_url) } })
+        ? jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: decodeDataUrl(f.data_url) } })
+        : jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: decodeDataUrl(f.data_url) } })
     ], key: f.name })),
-    ...rest.map(f => jsx('div', { className: `${ID}-prevPdf`, children: jsx('span', { className: `${ID}-prevName`, children: `${f.name} · ${fmtSize(f.size)} (too large to preview inline)` }), key: f.name })),
+    ...rest.map(f => jsx('div', { className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary) p-2 text-xs text-(--ui-text-secondary)', children: `${f.name} · ${fmtSize(f.size)} (too large to preview inline)`, key: f.name })),
   ] })
 }
 
@@ -362,18 +302,18 @@ const FILTERS = [
 function FeedRow({ item, selected, onSelect }) {
   const decided = item.status !== 'pending'
   return jsxs('div', {
-    className: `${ID}-row${selected ? ` ${ID}-rowSelected` : ''}${decided ? ` ${ID}-rowDecided` : ''}`,
+    className: `flex cursor-pointer gap-2 rounded-md border border-transparent p-2 hover:bg-(--ui-row-hover-background)${selected ? ' bg-(--ui-row-active-background) border-(--ui-stroke-secondary)' : ''}${decided ? ' opacity-60' : ''}`,
     onClick: () => onSelect(item.msg_id),
     children: [
-      jsx('div', { className: `${ID}-rowIcon`, style: { background: getTypeColor(item.type) + '20', color: getTypeColor(item.type), borderColor: getTypeColor(item.type) + '40' }, children: getTypeLabel(item.type) }),
-      jsxs('div', { className: `${ID}-rowBody`, children: [
-        jsxs('div', { className: `${ID}-rowHead`, children: [
-          jsx('span', { className: `${ID}-rowTitle`, children: itemTitle(item) }),
-          jsx('span', { className: `${ID}-rowTime`, title: absTime(item.ts), children: relTime(item.ts) || absTime(item.ts) }),
+      jsx('div', { className: 'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-xs font-bold', style: typeStyle(item.type), children: getTypeLabel(item.type) }),
+      jsxs('div', { className: 'flex min-w-0 flex-1 flex-col gap-1', children: [
+        jsxs('div', { className: 'flex items-center justify-between gap-2', children: [
+          jsx('span', { className: 'text-xs font-semibold break-words', children: itemTitle(item) }),
+          jsx('span', { className: 'text-xs whitespace-nowrap text-(--ui-text-quaternary)', title: absTime(item.ts), children: relTime(item.ts) || absTime(item.ts) }),
         ]}),
-        jsxs('div', { className: `${ID}-rowFoot`, children: [
+        jsxs('div', { className: 'flex items-center gap-2', children: [
           jsx(StatusBadge, { status: decided ? item.status : 'pending' }),
-          jsxs('span', { className: `${ID}-rowVer`, children: ['v', (item.artifact || {}).version || '?'] }),
+          jsxs('span', { className: 'rounded-sm bg-(--ui-bg-quaternary) px-1 py-0.5 text-xs font-bold text-(--ui-text-quaternary)', children: ['v', (item.artifact || {}).version || '?'] }),
         ]}),
       ]}),
     ]
@@ -381,37 +321,34 @@ function FeedRow({ item, selected, onSelect }) {
 }
 
 function FeedSidebar({ items, selectedId, onSelect, needle, onNeedleChange, filter, onFilterChange, counts }) {
-  return jsxs('div', { className: `${ID}-feed`, children: [
-    jsxs('div', { className: `${ID}-feedHead`, children: [
-      jsxs('div', { className: `${ID}-searchWrap`, children: [
-        jsx('span', { className: `${ID}-searchIcon`, children: 'Search' }),
-        jsx(SearchField, {
-          value: needle,
-          onChange: (v) => onNeedleChange(asText(v)),
-          placeholder: 'Search subject, owner, artifact…',
-          'aria-label': 'Search approval requests',
-          containerClassName: `${ID}-searchField`,
-        }),
-      ]}),
-      jsxs('div', { className: `${ID}-filterRow`, children: [
-        ...FILTERS.map(f =>
-          jsx('button', {
-            key: f.id,
-            className: `${ID}-filterChip${filter === f.id ? ` ${ID}-filterChipActive` : ''}`,
-            onClick: () => onFilterChange(f.id),
-            children: `${f.label} (${counts[f.id] ?? 0})`,
-          })
-        ),
-      ]}),
+  return jsxs('div', { className: 'flex w-56 shrink-0 flex-col min-h-0 border-r border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background)', children: [
+    jsxs('div', { className: 'flex shrink-0 flex-col gap-2 border-b border-(--ui-stroke-secondary) p-2', children: [
+      jsx(SearchField, {
+        value: needle,
+        onChange: (v) => onNeedleChange(asText(v)),
+        placeholder: 'Search subject, owner, artifact…',
+        'aria-label': 'Search approval requests',
+        containerClassName: 'w-full',
+      }),
+      jsx('div', { className: 'overflow-x-auto', children:
+        jsx(SegmentedControl, {
+          className: 'w-full',
+          sizing: 'content',
+          value: filter,
+          onChange: (id) => onFilterChange(id),
+          options: FILTERS.map(f => ({ id: f.id, label: `${f.label} (${counts[f.id] ?? 0})` })),
+        })
+      }),
     ]}),
-    jsx(ScrollArea, { className: `${ID}-feedScroll`, children:
+    jsx(ScrollArea, { className: 'flex-1 overflow-auto', children:
       items.length === 0
-        ? jsx('div', { className: 'grid h-full place-items-center p-4', children:
-            jsx('div', { className: `${ID}-emptyDesc`, style: { textAlign: 'center' }, children: 'No requests match your query.' })
+        ? jsx(EmptyState, {
+            title: needle ? 'No matching requests' : 'Nothing in this view',
+            description: needle ? 'Try a different search term.' : 'Switch the filter back to All to see every request.',
           })
-        : jsxs('div', { className: `${ID}-feedList`, children: [
-            ...items.map(it => jsx(FeedRow, { item: it, selected: it.msg_id === selectedId, onSelect, key: it.msg_id })),
-          ]})
+        : jsx('div', { className: 'flex flex-col gap-1 p-2', children:
+            items.map(it => jsx(FeedRow, { item: it, selected: it.msg_id === selectedId, onSelect, key: it.msg_id })),
+          })
     }),
   ] })
 }
@@ -426,12 +363,11 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
   const [approveOpen, setApproveOpen] = useState(false)
 
   if (!item) {
-    return jsxs('div', { className: `${ID}-workspace`, children: [
-      jsx('div', { className: `${ID}-empty`, children: [
-        jsx('div', { className: `${ID}-emptyIcon`, children: 'Artifact' }),
-        jsx('div', { className: `${ID}-emptyTitle`, children: 'No Artifact Selected' }),
-        jsx('div', { className: `${ID}-emptyDesc`, children: 'Select a request from the inbox to review quality and initiate actions.' }),
-      ]}),
+    return jsxs('div', { className: 'flex flex-1 min-h-0 min-w-0 flex-col', children: [
+      jsx(EmptyState, {
+        title: 'No artifact selected',
+        description: 'Select a request from the inbox to review it and take action.',
+      }),
     ] })
   }
 
@@ -439,28 +375,28 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
   const mainImage = previewFiles.find(f => f.kind === 'image' && f.data_url)
   const mainVideo = previewFiles.find(f => f.kind === 'video' && f.data_url)
 
-  return jsxs('div', { className: `${ID}-workspace`, children: [
-    jsxs('div', { className: `${ID}-inspector`, children: [
-      jsxs('div', { className: `${ID}-inspectorLeft`, children: [
-        jsx('span', { className: `${ID}-typeBadge`, style: { background: getTypeColor(item.type) + '18', borderColor: getTypeColor(item.type) + '40', color: getTypeColor(item.type) }, children: getTypeLabel(item.type) }),
-        jsxs('div', { style: { minWidth: 0, flex: 1 }, children: [
-          jsx('div', { className: `${ID}-inspectorTitle`, children: itemTitle(item) }),
-          jsxs('div', { className: `${ID}-inspectorMeta`, children: [
+  return jsxs('div', { className: 'flex flex-1 min-h-0 min-w-0 flex-col', children: [
+    jsxs('div', { className: 'flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-(--ui-stroke-secondary) px-2 py-2', children: [
+      jsxs('div', { className: 'flex min-w-0 flex-1 items-center gap-2', children: [
+        jsx('span', { className: 'rounded-sm border px-1.5 py-0.5 text-xs font-bold tracking-wide uppercase', style: typeStyle(item.type), children: getTypeLabel(item.type) }),
+        jsxs('div', { className: 'min-w-0 flex-1', children: [
+          jsx('div', { className: 'text-sm font-semibold break-words', children: itemTitle(item) }),
+          jsxs('div', { className: 'mt-0.5 text-xs text-(--ui-text-secondary)', children: [
             `File: ${art.name || '-'} · ${absTime(item.ts)} · v${art.version || '?'}`,
           ]}),
         ]}),
         jsx(StatusBadge, { status: decided ? item.status : 'pending' }),
       ]}),
-      !decided ? jsxs('div', { className: `${ID}-toolbar`, children: [
+      !decided ? jsxs('div', { className: 'flex shrink-0 flex-wrap items-center gap-2', children: [
         jsx(Button, { size: 'sm', onClick: onApproveClick, disabled: busy || decide.isPending, children: (busy || decide.isPending) ? 'Working…' : 'Approve' }),
         jsx(Button, { size: 'sm', variant: 'ghost', onClick: onRejectClick, disabled: busy || decide.isPending, children: rejectOpen ? 'Cancel' : 'Reject' }),
-        rejectOpen ? jsxs('div', { className: `${ID}-reasonRow`, children: [
+        rejectOpen ? jsxs('div', { className: 'flex min-w-0 flex-1 items-center gap-2', children: [
           jsx(Input, { value: rejectNote, onChange: (e) => onRejectNoteChange(asText(e)), placeholder: 'Reason for rejection…', 'aria-label': 'Rejection reason' }),
           jsx(Button, { size: 'sm', variant: 'outline', onClick: sendReject, disabled: busy || decide.isPending, children: 'Send' }),
         ]}) : null,
-      ]}) : jsxs('div', { className: `${ID}-toolbar`, children: [
+      ]}) : jsxs('div', { className: 'flex shrink-0 flex-wrap items-center gap-2', children: [
         jsx(StatusBadge, { status: item.status }),
-        decision.note ? jsxs('span', { className: `${ID}-inspectorMeta`, children: [decision.note, ' · ', absTime(decision.ts)] }) : null,
+        decision.note ? jsxs('span', { className: 'text-xs text-(--ui-text-secondary)', children: [decision.note, ' · ', absTime(decision.ts)] }) : null,
       ]}),
     ]}),
     jsx(ConfirmDialog, {
@@ -471,40 +407,40 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
       confirmLabel: 'Approve',
       onConfirm: async () => { decide.mutate({ item, decision: 'approve', note: '' }); setApproveOpen(false) },
     }),
-    jsx('div', { className: `${ID}-preview`, children: pv.isLoading && hasFiles ? jsx('div', { className: 'grid h-full place-items-center', children: jsx(GlyphSpinner, {}) }) : (
-      jsxs('div', { className: `${ID}-viewport`, children: [
-        jsxs('div', { className: `${ID}-viewportToolbar`, children: [
-          jsx('span', { className: `${ID}-viewportLabel`, children: `${(item.type || 'artifact').toUpperCase()} Viewport` }),
-          (mainImage || mainVideo) ? jsxs('div', { className: `${ID}-zoomControls`, children: [
-            jsx('button', { className: `${ID}-zoomBtn`, onClick: () => onZoomChange(Math.max(0.5, zoom - 0.1)), children: '−' }),
-            jsx('button', { className: `${ID}-zoomBtn`, onClick: () => onZoomChange(Math.min(2.5, zoom + 0.1)), children: '+' }),
-            jsx('button', { className: `${ID}-zoomBtn`, onClick: () => onZoomChange(1), children: 'Reset' }),
-            jsx('button', { className: `${ID}-zoomBtn`, onClick: () => { const f = mainImage || mainVideo; if (f) onFullscreen(f) }, children: 'Fullscreen' }),
+    jsx('div', { className: 'flex flex-1 flex-col items-center gap-3 overflow-auto p-4', children: pv.isLoading && hasFiles ? jsx('div', { className: 'grid h-full place-items-center p-4', children: jsx(GlyphSpinner, {}) }) : (
+      jsxs('div', { className: 'flex w-full flex-col', children: [
+        jsxs('div', { className: 'flex items-center justify-between gap-2 border-b border-(--ui-stroke-tertiary) pb-2', children: [
+          jsx('span', { className: 'text-xs font-semibold tracking-wide uppercase text-(--ui-text-quaternary)', children: `${(item.type || 'artifact').toUpperCase()} Viewport` }),
+          (mainImage || mainVideo) ? jsxs('div', { className: 'flex items-center gap-1', children: [
+            jsx(Button, { size: 'icon-xs', variant: 'ghost', onClick: () => onZoomChange(Math.max(0.5, zoom - 0.1)), 'aria-label': 'Zoom out', children: '−' }),
+            jsx(Button, { size: 'icon-xs', variant: 'ghost', onClick: () => onZoomChange(Math.min(2.5, zoom + 0.1)), 'aria-label': 'Zoom in', children: '+' }),
+            jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => onZoomChange(1), children: 'Reset' }),
+            jsx(Button, { size: 'xs', variant: 'outline', onClick: () => { const f = mainImage || mainVideo; if (f) onFullscreen(f) }, children: 'Fullscreen' }),
           ]}) : null,
         ]}),
-        (item.next_action || item.subject) ? jsxs('div', { className: `${ID}-mdContent`, children: [
-          jsxs('h3', { children: ['Context: ', itemTitle(item)] }),
+        (item.next_action || item.subject) ? jsxs('div', { className: 'mt-2 w-full rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-tertiary) p-3 text-xs leading-5 text-(--ui-text-secondary)', children: [
+          jsxs('h3', { className: 'mb-1 text-xs font-semibold text-(--ui-text-primary)', children: ['Context: ', itemTitle(item)] }),
           renderSimpleMd(item.next_action || ''),
         ]}) : null,
-        hasFiles ? jsx('div', { style: { marginTop: '1rem', width: '100%' }, children: jsx(PreviewBlock, { msgId, hasFiles: true, onFullscreen }) }) : null,
+        hasFiles ? jsx('div', { className: 'mt-2 w-full', children: jsx(PreviewBlock, { msgId, hasFiles: true, onFullscreen }) }) : null,
       ] })
     )}),
   ] })
 }
 
 function RightPanel({ item, tab, onTabChange, retryNote, onRetryNoteChange, onRetrySubmit, retryBusy }) {
+  const TABS = [{ id: 'retry', label: 'Retry Studio' }, { id: 'history', label: 'Audit Trail' }]
+
   if (!item) {
-    return jsxs('div', { className: `${ID}-panel`, children: [
-      jsxs('div', { className: `${ID}-panelTabs`, children: [
-        jsx('button', { className: `${ID}-panelTab ${ID}-panelTabActive`, children: 'Retry Studio' }),
-        jsx('button', { className: `${ID}-panelTab`, children: 'Audit Trail' }),
-      ]}),
-      jsx('div', { className: `${ID}-panelBody`, children: 
-        jsxs('div', { className: `${ID}-empty`, children: [
-          jsx('div', { className: `${ID}-emptyIcon`, children: 'Artifact' }),
-          jsx('div', { className: `${ID}-emptyTitle`, children: 'No Artifact Selected' }),
-          jsx('div', { className: `${ID}-emptyDesc`, children: 'Select an artifact to use Retry Studio and view audit history.' }),
-        ] })
+    return jsxs('div', { className: 'flex w-72 shrink-0 flex-col min-h-0 border-l border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background)', children: [
+      jsx('div', { className: 'flex shrink-0 border-b border-(--ui-stroke-secondary) p-2', children:
+        jsx(SegmentedControl, { className: 'w-full', value: tab, onChange: (id) => onTabChange(id), options: TABS })
+      }),
+      jsx('div', { className: 'flex-1 overflow-auto p-3', children:
+        jsx(EmptyState, {
+          title: 'No artifact selected',
+          description: 'Select a request to use Retry Studio and read its audit trail.',
+        })
       }),
     ] })
   }
@@ -514,64 +450,71 @@ function RightPanel({ item, tab, onTabChange, retryNote, onRetryNoteChange, onRe
   const decided = item.status !== 'pending'
   const chips = ['Remove Em-dashes', 'High-contrast typography', 'Shorten subtext', 'Punchy headline']
 
-  return jsxs('div', { className: `${ID}-panel`, children: [
-    jsxs('div', { className: `${ID}-panelTabs`, children: [
-      jsx('button', { className: `${ID}-panelTab${tab === 'retry' ? ` ${ID}-panelTabActive` : ''}`, onClick: () => onTabChange('retry'), children: 'Retry Studio' }),
-      jsx('button', { className: `${ID}-panelTab${tab === 'history' ? ` ${ID}-panelTabActive` : ''}`, onClick: () => onTabChange('history'), children: 'Audit Trail' }),
-    ]}),
-    jsxs('div', { className: `${ID}-panelBody`, children: [
+  return jsxs('div', { className: 'flex w-72 shrink-0 flex-col min-h-0 border-l border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background)', children: [
+    jsx('div', { className: 'flex shrink-0 border-b border-(--ui-stroke-secondary) p-2', children:
+      jsx(SegmentedControl, { className: 'w-full', value: tab, onChange: (id) => onTabChange(id), options: TABS })
+    }),
+    jsx('div', { className: 'flex-1 overflow-auto p-3', children:
       tab === 'retry' ? jsxs('div', { children: [
-        jsxs('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }, children: [
-          jsx('label', { className: `${ID}-retryLabel`, children: 'Retry instructions' }),
-          jsxs('span', { className: `${ID}-nextVer`, children: ['Next: v', nextVer] }),
+        jsxs('div', { className: 'mb-2 flex items-center justify-between gap-2', children: [
+          jsx('label', { className: 'text-xs font-bold text-(--ui-text-primary)', children: 'Retry instructions' }),
+          jsxs('span', { className: 'rounded-full border border-(--ui-stroke-secondary) px-1.5 py-0.5 text-xs font-bold text-(--ui-accent)', children: ['Next: v', nextVer] }),
         ]}),
-        jsx('p', { className: `${ID}-retryHint`, children: 'Add instructions to refine the artifact before re-triggering the producing lane.' }),
-        jsxs('div', { className: `${ID}-chipRow`, children: [
-          ...chips.map(c => jsx('button', { key: c, className: `${ID}-chip`, onClick: () => onRetryNoteChange(v => v ? `${v}, ${c}` : c), children: c })),
+        jsx('p', { className: 'mb-2 text-xs text-(--ui-text-quaternary)', children: 'Add instructions to refine the artifact before re-triggering the producing lane.' }),
+        jsxs('div', { className: 'mb-2 flex flex-wrap gap-1', children: [
+          ...chips.map(c => jsx(Button, { key: c, size: 'xs', variant: 'chip', onClick: () => onRetryNoteChange(v => v ? `${v}, ${c}` : c), children: c })),
         ]}),
-        jsx('textarea', { className: `${ID}-retryTextarea`, value: retryNote, onChange: (e) => onRetryNoteChange(e.target.value), placeholder: 'Enter explicit guidelines to eliminate issues or adjust layout/copy…', rows: 5 }),
-        decided ? jsx('div', { className: `${ID}-retryHint`, children: 'This item has already been decided. Submit will create a new pending version.' }) : null,
-        jsx('button', { className: `${ID}-submitBtn`, onClick: onRetrySubmit, disabled: retryBusy || !retryNote.trim(), children: retryBusy ? 'Submitting…' : 'Request new version' }),
+        jsx('textarea', { className: 'w-full resize-y rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-editor) p-2 text-xs text-(--ui-text-primary)', value: retryNote, onChange: (e) => onRetryNoteChange(e.target.value), placeholder: 'Enter explicit guidelines to eliminate issues or adjust layout/copy…', rows: 5 }),
+        decided ? jsx('div', { className: 'mt-2 text-xs text-(--ui-text-quaternary)', children: 'This item has already been decided. Submit will create a new pending version.' }) : null,
+        jsx(Button, { className: 'mt-2 w-full', size: 'sm', onClick: onRetrySubmit, disabled: retryBusy || !retryNote.trim(), children: retryBusy ? 'Submitting…' : 'Request new version' }),
       ]}) : jsxs('div', { children: [
-        jsxs('div', { className: `${ID}-timelineItem`, children: [
-          jsx('div', { className: `${ID}-timelineDotPast` }),
+        jsxs('div', { className: 'relative border-l border-(--ui-stroke-secondary) pl-3 pb-2', children: [
+          jsx('div', { className: 'absolute size-2 rounded-full', style: { left: '-0.25rem', top: '0.25rem', backgroundColor: T.past } }),
           jsxs('div', { children: [
-            jsx('span', { className: `${ID}-timelineAction`, children: 'Submitted' }),
-            jsx('span', { className: `${ID}-timelineTime`, children: absTime(item.ts) }),
+            jsx('span', { className: 'text-xs font-semibold', children: 'Submitted' }),
+            jsx('span', { className: 'ml-1 text-xs text-(--ui-text-quaternary)', children: absTime(item.ts) }),
           ]}),
         ]}),
-        decided && item.decision ? jsxs('div', { className: `${ID}-timelineItem`, children: [
-          jsx('div', { className: `${ID}-timelineDot` }),
+        decided && item.decision ? jsxs('div', { className: 'relative border-l border-transparent pl-3', children: [
+          jsx('div', { className: 'absolute size-2 rounded-full', style: { left: '-0.25rem', top: '0.25rem', backgroundColor: item.status === 'approved' ? T.green : T.red } }),
           jsxs('div', { children: [
-            jsxs('span', { className: `${ID}-timelineAction`, children: [item.status === 'approved' ? 'Approved' : 'Rejected'] }),
-            jsx('span', { className: `${ID}-timelineTime`, children: absTime(item.decision.ts) }),
+            jsxs('span', { className: 'text-xs font-semibold', children: [item.status === 'approved' ? 'Approved' : 'Rejected'] }),
+            jsx('span', { className: 'ml-1 text-xs text-(--ui-text-quaternary)', children: absTime(item.decision.ts) }),
           ]}),
-          item.decision.note ? jsx('div', { className: `${ID}-timelineNote`, children: item.decision.note }) : null,
-          jsxs('div', { className: `${ID}-timelineActor`, children: ['Decided by ', item.decision.by || item.originating_agent || '-'] }),
+          item.decision.note ? jsx('div', { className: 'mt-0.5 text-xs leading-4 text-(--ui-text-secondary)', children: item.decision.note }) : null,
+          jsxs('div', { className: 'mt-0.5 text-xs text-(--ui-text-quaternary)', children: ['Decided by ', item.decision.by || item.originating_agent || '-'] }),
         ]}) : null,
-      ]}),
-    ]}),
+      ]})
+    }),
   ] })
 }
 
 function FullscreenModal({ file, onClose }) {
   if (!file) return null
-  return jsxs('div', { className: `${ID}-fullscreen`, onClick: onClose, children: [
-    jsxs('div', { className: `${ID}-fullscreenInner`, onClick: (e) => e.stopPropagation(), children: [
-      jsxs('div', { className: `${ID}-fullscreenHead`, children: [
-        jsxs('span', { className: `${ID}-fullscreenTitle`, children: [file.name, ' — full view'] }),
-        jsx('button', { className: `${ID}-fullscreenClose`, onClick: onClose, children: 'Close' }),
-      ]}),
-      jsx('div', { className: `${ID}-fullscreenBody`, children: 
-        file.kind === 'image' ? jsx('img', { src: file.data_url, style: { maxHeight: '80vh', maxWidth: '100%', objectFit: 'contain' } })
-        : file.kind === 'video' ? jsx('video', { src: file.data_url, controls: true, style: { maxHeight: '80vh', maxWidth: '100%' } })
-        : file.kind === 'pdf' ? jsx('embed', { src: file.data_url, type: 'application/pdf', style: { width: '100%', height: '70vh' } })
-        : file.kind === 'md' ? jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(file.data_url)) } })
-        : file.kind === 'html' ? jsx('div', { className: `${ID}-viewport`, style: { padding: '1rem' }, dangerouslySetInnerHTML: { __html: decodeDataUrl(file.data_url) } })
-        : jsx('div', { children: 'Full preview not available for this file type.' })
-      }),
-    ]}),
-  ] })
+  return jsxs('div', {
+    className: 'fixed inset-0 z-50 flex items-center justify-center p-4',
+    style: { backgroundColor: tint(T.base, 92) },
+    onClick: onClose,
+    children: [
+      jsxs('div', {
+        className: 'relative flex flex-col overflow-hidden rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-elevated)',
+        style: { width: '100%', maxWidth: '72rem', maxHeight: '90vh' },
+        onClick: (e) => e.stopPropagation(),
+        children: [
+          jsxs('div', { className: 'flex items-center justify-between gap-2 border-b border-(--ui-stroke-secondary) p-3', children: [
+            jsxs('span', { className: 'text-sm font-semibold', children: [file.name, ' — full view'] }),
+            jsx(Button, { size: 'xs', variant: 'outline', onClick: onClose, children: 'Close' }),
+          ]}),
+          jsx('div', { className: 'flex flex-1 items-center justify-center overflow-auto p-4', children:
+            file.kind === 'image' ? jsx('img', { src: file.data_url, style: { maxHeight: '80vh', maxWidth: '100%', objectFit: 'contain' } })
+            : file.kind === 'video' ? jsx('video', { src: file.data_url, controls: true, style: { maxHeight: '80vh', maxWidth: '100%' } })
+            : file.kind === 'pdf' ? jsx('embed', { src: file.data_url, type: 'application/pdf', style: { width: '100%', height: '70vh' } })
+            : file.kind === 'md' ? jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(file.data_url)) } })
+            : file.kind === 'html' ? jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: decodeDataUrl(file.data_url) } })
+            : jsx('div', { className: 'text-xs text-(--ui-text-secondary)', children: 'Full preview not available for this file type.' })
+          }),
+        ]}),
+    ] })
 }
 
 function InboxPane() {
@@ -625,6 +568,7 @@ function InboxPane() {
 
   const selectedItem = selectedId ? items.find(i => i.msg_id === selectedId) : null
   const busy = decide.isPending || retryBusy
+  const reload = () => { queryClient.invalidateQueries({ queryKey: [ID] }) }
 
   useEffect(() => {
     if (selectedId && !items.some(i => i.msg_id === selectedId)) {
@@ -686,19 +630,19 @@ function InboxPane() {
   const emptyCopy = needle
     ? { title: 'No matching requests', description: 'Try a different search term.' }
     : filter === 'all'
-      ? { title: 'Nothing here yet', description: 'Approval requests will appear here.' }
-      : { title: 'Nothing in this view', description: 'No requests match the current filter.' }
+      ? { title: 'Nothing here yet', description: 'Approval requests appear here as soon as your lanes raise one.' }
+      : { title: 'Nothing in this view', description: 'Switch the filter back to All to see every request.' }
 
-  return jsxs('div', { className: `${ID}`, children: [
-    jsxs('div', { className: `${ID}-header`, children: [
-      jsx('button', { className: `${ID}-brand`, onClick: () => { if (host?.navigate) host.navigate(PAGE_PATH) }, children: 'Approval Inbox' }),
-      jsxs('div', { className: `${ID}-metrics`, children: [
-        metricChip('Pending', counts.pending, '#b45309'),
-        metricChip('Re-Get', counts.reget, '#6366f1'),
-        metricChip('Approved', counts.approved, '#047857'),
-        metricChip('Rejected', counts.rejected, '#b91c1c'),
+  return jsxs('div', { className: 'flex h-full min-h-0 flex-col text-(--ui-text-primary)', children: [
+    jsxs('div', { className: 'flex shrink-0 flex-wrap items-center gap-2 border-b border-(--ui-stroke-secondary) px-2 py-1', children: [
+      jsx(Button, { size: 'sm', variant: 'ghost', className: 'font-semibold', onClick: () => { if (host?.navigate) host.navigate(PAGE_PATH) }, children: 'Approval Inbox' }),
+      jsxs('div', { className: 'flex flex-wrap items-center gap-1', children: [
+        metricChip('Pending', counts.pending, T.yellow),
+        metricChip('Re-Get', counts.reget, T.accent2),
+        metricChip('Approved', counts.approved, T.green),
+        metricChip('Rejected', counts.rejected, T.red),
       ]}),
-      jsx('span', { className: `${ID}-spacer` }),
+      jsx('span', { className: 'flex-1' }),
       jsx(SearchField, {
         value: needle,
         onChange: (v) => setNeedle(asText(v)),
@@ -706,26 +650,25 @@ function InboxPane() {
         'aria-label': 'Search approval requests',
         containerClassName: 'w-56',
       }),
-      jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => { queryClient.invalidateQueries({ queryKey: [ID] }) }, disabled: q.isPending, 'aria-label': 'Refresh inbox', children: q.isPending ? 'Refreshing…' : 'Refresh' }),
+      jsx(Button, { size: 'xs', variant: 'ghost', onClick: reload, disabled: q.isPending, 'aria-label': 'Refresh inbox', children: q.isPending ? 'Refreshing…' : 'Refresh' }),
     ]}),
-    jsxs('div', { className: `${ID}-body`, children: [
+    jsxs('div', { className: 'flex flex-1 min-h-0', children: [
       jsx(FeedSidebar, { items: visible, selectedId, onSelect: setSelectedId, needle, onNeedleChange: setNeedle, filter, onFilterChange: setFilter, counts }),
       q.isLoading && items.length === 0
-        ? jsx('div', { className: `${ID}-workspace`, children: jsx('div', { className: 'grid h-full place-items-center', children: jsx(GlyphSpinner, {}) }) })
-        : error
-          ? jsxs('div', { className: `${ID}-workspace`, children: [
-              jsx(ErrorState, { title: 'Could not load approvals', description: error }),
-              jsx(Button, { size: 'xs', variant: 'outline', onClick: () => { queryClient.invalidateQueries({ queryKey: [ID] }) }, children: 'Retry' }),
-            ]})
+        ? jsx('div', { className: 'flex flex-1 min-h-0 flex-col', children: jsx('div', { className: 'grid h-full place-items-center p-4', children: jsx(GlyphSpinner, {}) }) })
+        : error && !selectedItem
+          ? jsx('div', { className: 'flex flex-1 min-h-0 items-center justify-center p-4', children:
+              jsx(ErrorState, {
+                title: 'Could not load approvals',
+                description: error,
+                children: jsx(Button, { size: 'sm', variant: 'outline', onClick: reload, children: 'Retry' }),
+              })
+            })
           : selectedItem
             ? jsx(CenterWorkspace, { item: selectedItem, decide, busy, zoom, onZoomChange: setZoom, onFullscreen: setFullscreen, onApproveClick: () => setApproveOpen(true), onRejectClick: () => setRejectOpen(true), rejectOpen, rejectNote, onRejectNoteChange: setRejectNote, sendReject })
-            : jsxs('div', { className: `${ID}-workspace`, children: [
-                jsx('div', { className: `${ID}-empty`, children: [
-                  jsx('div', { className: `${ID}-emptyIcon`, children: 'Artifact' }),
-                  jsx('div', { className: `${ID}-emptyTitle`, children: emptyCopy.title }),
-                  jsx('div', { className: `${ID}-emptyDesc`, children: emptyCopy.description }),
-                ]}),
-              ] }),
+            : jsx('div', { className: 'flex flex-1 min-h-0 flex-col', children:
+                jsx(EmptyState, { title: emptyCopy.title, description: emptyCopy.description })
+              }),
       jsx(RightPanel, { item: selectedItem, tab: rightTab, onTabChange: setRightTab, retryNote, onRetryNoteChange: setRetryNote, onRetrySubmit: handleRetrySubmit, retryBusy }),
     ]}),
     jsx(FullscreenModal, { file: fullscreen, onClose: () => setFullscreen(null) }),
@@ -747,7 +690,6 @@ export default {
   defaultEnabled: true,
 
   register(ctx) {
-    ensureStyles()
     rest = ctx.rest
     if (ctx.storage) {
       storeGet = (key, fallback) => ctx.storage.get(key, fallback)
