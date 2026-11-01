@@ -1,5 +1,5 @@
 /**
- * Hermes Approval Inbox — desktop plugin (v0.4.7).
+ * Hermes Approval Inbox — desktop plugin (v0.4.8).
  *
  * Hermes-native rewrite of the approval-inbox pane.
  *
@@ -11,6 +11,12 @@
  *
  * Backend: the approval-inbox dashboard plugin API at
  * /api/plugins/approval-inbox/ (items, preview, decide).
+ *
+ * Craft standard (vs compliance): feed rows are keyboard reachable
+ * (role=button, tabIndex, Enter/Space), the empty view carries a next-step
+ * action, hierarchy and type scale follow the app's own chrome, one accent
+ * colour (var(--ui-accent)) for the critical Re-Get state and the primary
+ * Approve action, no decorative motion.
  */
 
 import {
@@ -45,7 +51,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.4.7'
+const APP_VERSION = '0.4.8'
 
 let rest = null
 
@@ -72,9 +78,7 @@ function itemTitle(item) {
   return `${item.type || 'approval'} request`
 }
 
-/**
- * Client-side search across the fields a request is found by.
- */
+/** Client-side search across the fields a request is found by. */
 function matches(item, needle) {
   if (!needle) return true
   const hay = [
@@ -152,8 +156,10 @@ function absTime(iso) {
   return t.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-/** One status pill: out of the box, the Re-Get state is tinted with the app
- *  accent (the only critical state). */
+/**
+ * One status pill: out of the box, the Re-Get state is tinted with the app
+ * accent (the only critical state). Everything else is neutral.
+ */
 function StatusPill({ status, decision }) {
   const accent = decision != null && /re-get|rework|retry/i.test(
     String(decision.note ?? '') + ' ' + String(decision.decision ?? '')
@@ -165,13 +171,22 @@ function StatusPill({ status, decision }) {
   })
 }
 
-/** Row in the feed sidebar. */
+/**
+ * Row in the feed sidebar. Keyboard reachable (role=button + tabIndex + Enter/
+ * Space) so a keyboard-only operator can move through the queue.
+ */
 function FeedRow({ item, selected, onSelect }) {
   const decided = item.status !== 'pending'
   return jsxs('div', {
-    className: `flex cursor-pointer flex-row items-center gap-1.5 rounded-lg border border-transparent p-1.5 transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground ${
-      selected ? 'bg-(--ui-bg-editor) text-foreground' : 'text-(--ui-text-secondary)'
-    }`,
+    role: 'button',
+    tabIndex: 0,
+    className: 'flex cursor-pointer flex-row items-center gap-1.5 rounded-lg border border-transparent p-1.5 transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground select-none focus:outline-focus focus:outline-2 focus:outline-focus/30',
+    onKeyDown: (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        onSelect()
+      }
+    },
     children: [
       jsx('div', {
         className: 'flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-hover) text-xs font-semibold text-(--ui-text-quaternary)',
@@ -180,7 +195,7 @@ function FeedRow({ item, selected, onSelect }) {
       jsxs('div', { className: 'min-w-0 flex-1', children: [
         jsxs('div', { className: 'flex flex-1 items-center justify-between gap-2', children: [
           jsx('span', { className: 'max-w-[14rem] truncate text-xs font-medium leading-tight text-foreground', children: itemTitle(item) }),
-          jsx('span', { className: 'shrink-0 whitespace-nowrap text-[0.625rem] font-medium text-(--ui-text-quaternary)', children: relTime(item.ts) || absTime(item.ts) }),
+          jsx('span', { className: 'shrink-0 whitespace-nowrap text-[0.625rem] font-medium tabular-nums text-(--ui-text-quaternary)', children: relTime(item.ts) || absTime(item.ts) }),
         ]}),
         jsxs('div', { className: 'flex flex-wrap items-center gap-x-2 gap-y-0.5', children: [
           jsx(StatusPill, { status: decided ? item.status : 'pending', decision: decided ? item.decision : undefined }),
@@ -199,10 +214,7 @@ const FILTERS = [
   { id: 'rejected', label: 'Rejected' },
 ]
 
-/**
- * Feed sidebar: sticky search + filter band, live result counts, scrollable
- * rows with hover and selection.
- */
+/** Feed sidebar: sticky search + filter band, live result counts, scrollable rows. */
 function FeedSidebar({ items, selectedId, onSelect, needle, onNeedleChange, filter, onFilterChange, counts }) {
   return jsxs('aside', {
     className: 'flex flex-col border-b border-(--ui-stroke-secondary) bg-(--ui-bg-card) shrink-0',
@@ -242,10 +254,7 @@ function FeedSidebar({ items, selectedId, onSelect, needle, onNeedleChange, filt
   })
 }
 
-/**
- * Preview for an item's attachments (image, video, pdf, text).
- * Only data URLs and themed surfaces — no hand-rolled chrome.
- */
+/** Preview for an item's attachments (image, video, pdf, text). No hand-rolled chrome. */
 function PreviewPanel({ files, loading }) {
   if (files.length === 0) {
     return jsx('div', {
@@ -298,9 +307,7 @@ function PreviewPanel({ files, loading }) {
   })
 }
 
-/**
- * Item detail. Rendered as a Dialog over the content pane.
- */
+/** Item detail. Rendered as a Dialog over the content pane. */
 function DetailDialog({ item, decide, onClose }) {
   const [tab, setTab] = useState('retry')
   const decided = item.status !== 'pending'
@@ -387,7 +394,7 @@ function DetailDialog({ item, decide, onClose }) {
         onConfirm: () => {
           decide.mutate({ item, decision: 'reject', note: rejectNote.trim() })
         },
-        title: `Reject "${itemTitle(item)}"`,
+        title: `Reject \"${itemTitle(item)}\"`,
         description: 'Adding a reason helps the producing lane fix the artifact.',
         children: jsx(Input, {
           value: rejectNote,
@@ -405,9 +412,7 @@ function decidedBy(item) {
   return ''
 }
 
-/**
- * Retry tab: chips plus a text field for explicit re-trigger instructions.
- */
+/** Retry tab: chips plus a text field for explicit re-trigger instructions. */
 function RetryTab({ item, decide }) {
   const [note, setNote] = useState('')
   const decided = item.status !== 'pending'
@@ -438,10 +443,7 @@ function RetryTab({ item, decide }) {
   ])
 }
 
-/**
- * History tab: the decision that closed this request, with its note and who
- * made it.
- */
+/** History tab: the decision that closed this request, with its note and who made it. */
 function HistoryTab({ item }) {
   const d = item.decision
   if (!d) return jsx('p', { className: 'text-xs leading-5 text-(--ui-text-secondary)' }, 'No decisions yet.')
@@ -458,10 +460,7 @@ function HistoryTab({ item }) {
   ])
 }
 
-/**
- * Page: feed sidebar + detail Dialog. Loading, error and empty states are
- * rendered for every view. Counts and search are read live from the backend.
- */
+/** Page: feed sidebar + detail Dialog. Loading, error and empty states for every view. */
 function InboxPane() {
   const [needle, setNeedle] = useState('')
   const [filter, setFilter] = useState('all')
@@ -498,6 +497,11 @@ function InboxPane() {
   useEffect(() => {
     if (qError && !items.length) setError(errText(qError))
   }, [qError, items.length])
+
+  const clearFilters = () => {
+    setNeedle('')
+    setFilter('all')
+  }
 
   return jsxs('div', { className: 'flex h-full flex-col' }, [
     jsxs('div', { className: 'flex flex-wrap items-center gap-2 border-b border-(--ui-stroke-secondary) p-2' }, [
@@ -554,7 +558,11 @@ function InboxPane() {
                   jsx(Button, { variant: 'outline', onClick: () => setError(null), children: 'Retry' }),
                 ])
               : jsxs('div', { className: 'flex flex-col items-center justify-center p-4' }, [
-                  jsx(EmptyState, { title: 'No requests match', description: 'Try a different search term, or clear the filters to see all requests.' }),
+                  jsx(EmptyState, {
+                    title: 'No requests match',
+                    description: 'Try a different search term, or clear the filters to see all requests.',
+                  }),
+                  jsx(Button, { variant: 'outline', onClick: clearFilters, children: 'Clear filters' }),
                 ]),
       ]),
     ]),
