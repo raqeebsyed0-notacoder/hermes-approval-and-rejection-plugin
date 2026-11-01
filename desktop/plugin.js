@@ -1,9 +1,15 @@
 /**
  * Hermes Approval Inbox — desktop plugin.
  *
- * Three-pane workspace: feed sidebar, center preview viewport, right
- * Retry-Studio / Audit-Trail panel. Reuses proven data hooks and UI
- * components. No external AI calls, no external image URLs, no demo data.
+ * Single-column inbox (the pane design contract): header row (title, pending
+ * count, search, refresh) → filter row (counts in the labels) → the request
+ * list → the selected request's detail, with the Retry-Studio / Audit-Trail
+ * section stacked beneath it. No fixed-width side panes: every block is
+ * `w-full min-w-0`, so the panel renders correctly at any pane width instead
+ * of crushing a text column to one character per line.
+ *
+ * Reuses proven data hooks and UI components. No external AI calls, no
+ * external image URLs, no demo data.
  *
  * Styling is native: every colour resolves to one of the Desktop's own
  * `--ui-*` theme custom properties, every action is an SDK `Button` /
@@ -25,7 +31,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.5.0'
+const APP_VERSION = '0.6.0'
 
 let rest = null
 let storeGet = null
@@ -320,27 +326,9 @@ function FeedRow({ item, selected, onSelect }) {
   })
 }
 
-function FeedSidebar({ items, selectedId, onSelect, needle, onNeedleChange, filter, onFilterChange, counts }) {
-  return jsxs('div', { className: 'flex w-56 shrink-0 flex-col min-h-0 border-r border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background)', children: [
-    jsxs('div', { className: 'flex shrink-0 flex-col gap-2 border-b border-(--ui-stroke-secondary) p-2', children: [
-      jsx(SearchField, {
-        value: needle,
-        onChange: (v) => onNeedleChange(asText(v)),
-        placeholder: 'Search subject, owner, artifact…',
-        'aria-label': 'Search approval requests',
-        containerClassName: 'w-full',
-      }),
-      jsx('div', { className: 'overflow-x-auto', children:
-        jsx(SegmentedControl, {
-          className: 'w-full',
-          sizing: 'content',
-          value: filter,
-          onChange: (id) => onFilterChange(id),
-          options: FILTERS.map(f => ({ id: f.id, label: `${f.label} (${counts[f.id] ?? 0})` })),
-        })
-      }),
-    ]}),
-    jsx(ScrollArea, { className: 'flex-1 overflow-auto', children:
+function RequestList({ items, selectedId, onSelect, needle }) {
+  return jsxs('div', { className: 'flex w-full min-w-0 flex-col bg-(--ui-sidebar-surface-background)', children: [
+    jsx(ScrollArea, { className: 'w-full overflow-auto', children:
       items.length === 0
         ? jsx(EmptyState, {
             title: needle ? 'No matching requests' : 'Nothing in this view',
@@ -353,7 +341,7 @@ function FeedSidebar({ items, selectedId, onSelect, needle, onNeedleChange, filt
   ] })
 }
 
-function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen, onApproveClick, onRejectClick, rejectOpen, rejectNote, onRejectNoteChange, sendReject }) {
+function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen, onApproveClick, onRejectClick, rejectOpen, rejectNote, onRejectNoteChange, sendReject, onBack, panelTab, onPanelTabChange, retryNote, onRetryNoteChange, onRetrySubmit, retryBusy }) {
   const msgId = item?.msg_id
   const hasFiles = (item?.attachments?.length || 0) > 0
   const pv = usePreview(msgId, hasFiles)
@@ -375,29 +363,28 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
   const mainImage = previewFiles.find(f => f.kind === 'image' && f.data_url)
   const mainVideo = previewFiles.find(f => f.kind === 'video' && f.data_url)
 
-  return jsxs('div', { className: 'flex flex-1 min-h-0 min-w-0 flex-col', children: [
-    jsxs('div', { className: 'flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-(--ui-stroke-secondary) px-2 py-2', children: [
-      jsxs('div', { className: 'flex min-w-0 flex-1 items-center gap-2', children: [
+  return jsxs('div', { className: 'flex w-full min-w-0 flex-col', children: [
+    jsxs('div', { className: 'flex w-full shrink-0 flex-col gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2', children: [
+      jsxs('div', { className: 'flex min-w-0 items-center gap-2', children: [
+        jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => onBack && onBack(null), 'aria-label': 'Back to the request list', children: '‹ Back' }),
         jsx('span', { className: 'rounded-sm border px-1.5 py-0.5 text-xs font-bold tracking-wide uppercase', style: typeStyle(item.type), children: getTypeLabel(item.type) }),
-        jsxs('div', { className: 'min-w-0 flex-1', children: [
-          jsx('div', { className: 'text-sm font-semibold break-words', children: itemTitle(item) }),
-          jsxs('div', { className: 'mt-0.5 text-xs text-(--ui-text-secondary)', children: [
-            `File: ${art.name || '-'} · ${absTime(item.ts)} · v${art.version || '?'}`,
-          ]}),
-        ]}),
+        jsx('div', { className: 'min-w-0 flex-1 text-sm font-semibold break-words', children: itemTitle(item) }),
         jsx(StatusBadge, { status: decided ? item.status : 'pending' }),
       ]}),
-      !decided ? jsxs('div', { className: 'flex shrink-0 flex-wrap items-center gap-2', children: [
+      jsx('div', { className: 'min-w-0 text-xs text-(--ui-text-secondary)', children:
+        `Artifact: ${art.name || '-'} · submitted ${absTime(item.ts)} · v${art.version || '?'}`,
+      }),
+      !decided ? jsxs('div', { className: 'flex flex-wrap items-center gap-2', children: [
         jsx(Button, { size: 'sm', onClick: onApproveClick, disabled: busy || decide.isPending, children: (busy || decide.isPending) ? 'Working…' : 'Approve' }),
-        jsx(Button, { size: 'sm', variant: 'ghost', onClick: onRejectClick, disabled: busy || decide.isPending, children: rejectOpen ? 'Cancel' : 'Reject' }),
-        rejectOpen ? jsxs('div', { className: 'flex min-w-0 flex-1 items-center gap-2', children: [
-          jsx(Input, { value: rejectNote, onChange: (e) => onRejectNoteChange(asText(e)), placeholder: 'Reason for rejection…', 'aria-label': 'Rejection reason' }),
-          jsx(Button, { size: 'sm', variant: 'outline', onClick: sendReject, disabled: busy || decide.isPending, children: 'Send' }),
-        ]}) : null,
-      ]}) : jsxs('div', { className: 'flex shrink-0 flex-wrap items-center gap-2', children: [
+        jsx(Button, { size: 'sm', variant: 'ghost', onClick: onRejectClick, disabled: busy || decide.isPending, children: rejectOpen ? 'Cancel rejection' : 'Reject' }),
+      ]}) : jsxs('div', { className: 'flex flex-wrap items-center gap-2', children: [
         jsx(StatusBadge, { status: item.status }),
         decision.note ? jsxs('span', { className: 'text-xs text-(--ui-text-secondary)', children: [decision.note, ' · ', absTime(decision.ts)] }) : null,
       ]}),
+      rejectOpen ? jsxs('div', { className: 'flex w-full min-w-0 flex-wrap items-center gap-2', children: [
+        jsx(Input, { className: 'min-w-0 flex-1', value: rejectNote, onChange: (e) => onRejectNoteChange(asText(e)), placeholder: 'Reason for rejection…', 'aria-label': 'Rejection reason' }),
+        jsx(Button, { size: 'sm', variant: 'outline', onClick: sendReject, disabled: busy || decide.isPending, children: 'Send rejection' }),
+      ]}) : null,
     ]}),
     jsx(ConfirmDialog, {
       open: approveOpen,
@@ -432,7 +419,7 @@ function RightPanel({ item, tab, onTabChange, retryNote, onRetryNoteChange, onRe
   const TABS = [{ id: 'retry', label: 'Retry Studio' }, { id: 'history', label: 'Audit Trail' }]
 
   if (!item) {
-    return jsxs('div', { className: 'flex w-72 shrink-0 flex-col min-h-0 border-l border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background)', children: [
+    return jsxs('div', { className: 'flex w-full min-w-0 flex-col border-t border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background)', children: [
       jsx('div', { className: 'flex shrink-0 border-b border-(--ui-stroke-secondary) p-2', children:
         jsx(SegmentedControl, { className: 'w-full', value: tab, onChange: (id) => onTabChange(id), options: TABS })
       }),
@@ -450,7 +437,7 @@ function RightPanel({ item, tab, onTabChange, retryNote, onRetryNoteChange, onRe
   const decided = item.status !== 'pending'
   const chips = ['Remove Em-dashes', 'High-contrast typography', 'Shorten subtext', 'Punchy headline']
 
-  return jsxs('div', { className: 'flex w-72 shrink-0 flex-col min-h-0 border-l border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background)', children: [
+  return jsxs('div', { className: 'flex w-full min-w-0 flex-col border-t border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background)', children: [
     jsx('div', { className: 'flex shrink-0 border-b border-(--ui-stroke-secondary) p-2', children:
       jsx(SegmentedControl, { className: 'w-full', value: tab, onChange: (id) => onTabChange(id), options: TABS })
     }),
@@ -634,26 +621,29 @@ function InboxPane() {
       : { title: 'Nothing in this view', description: 'Switch the filter back to All to see every request.' }
 
   return jsxs('div', { className: 'flex h-full min-h-0 flex-col text-(--ui-text-primary)', children: [
-    jsxs('div', { className: 'flex shrink-0 flex-wrap items-center gap-2 border-b border-(--ui-stroke-secondary) px-2 py-1', children: [
+    jsxs('div', { className: 'flex w-full shrink-0 flex-wrap items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2', children: [
       jsx(Button, { size: 'sm', variant: 'ghost', className: 'font-semibold', onClick: () => { if (host?.navigate) host.navigate(PAGE_PATH) }, children: 'Approval Inbox' }),
-      jsxs('div', { className: 'flex flex-wrap items-center gap-1', children: [
-        metricChip('Pending', counts.pending, T.yellow),
-        metricChip('Re-Get', counts.reget, T.accent2),
-        metricChip('Approved', counts.approved, T.green),
-        metricChip('Rejected', counts.rejected, T.red),
-      ]}),
+      jsx(Badge, { variant: 'outline', children: `${counts.pending} pending` }),
       jsx('span', { className: 'flex-1' }),
       jsx(SearchField, {
         value: needle,
         onChange: (v) => setNeedle(asText(v)),
         placeholder: 'Search subject, owner, artifact…',
         'aria-label': 'Search approval requests',
-        containerClassName: 'w-56',
+        containerClassName: 'w-64 max-w-full',
       }),
       jsx(Button, { size: 'xs', variant: 'ghost', onClick: reload, disabled: q.isPending, 'aria-label': 'Refresh inbox', children: q.isPending ? 'Refreshing…' : 'Refresh' }),
     ]}),
-    jsxs('div', { className: 'flex flex-1 min-h-0', children: [
-      jsx(FeedSidebar, { items: visible, selectedId, onSelect: setSelectedId, needle, onNeedleChange: setNeedle, filter, onFilterChange: setFilter, counts }),
+    jsx('div', { className: 'w-full shrink-0 overflow-x-auto border-b border-(--ui-stroke-secondary) px-3 py-2', children:
+      jsx(SegmentedControl, {
+        className: 'w-full',
+        sizing: 'content',
+        value: filter,
+        onChange: (id) => setFilter(id),
+        options: FILTERS.map(f => ({ id: f.id, label: `${f.label} (${counts[f.id] ?? 0})` })),
+      })
+    }),
+    jsxs('div', { className: 'flex flex-1 min-h-0 w-full min-w-0 flex-col', children: [
       q.isLoading && items.length === 0
         ? jsx('div', { className: 'flex flex-1 min-h-0 flex-col', children: jsx('div', { className: 'grid h-full place-items-center p-4', children: jsx(GlyphSpinner, {}) }) })
         : error && !selectedItem
@@ -665,11 +655,9 @@ function InboxPane() {
               })
             })
           : selectedItem
-            ? jsx(CenterWorkspace, { item: selectedItem, decide, busy, zoom, onZoomChange: setZoom, onFullscreen: setFullscreen, onApproveClick: () => setApproveOpen(true), onRejectClick: () => setRejectOpen(true), rejectOpen, rejectNote, onRejectNoteChange: setRejectNote, sendReject })
-            : jsx('div', { className: 'flex flex-1 min-h-0 flex-col', children:
-                jsx(EmptyState, { title: emptyCopy.title, description: emptyCopy.description })
-              }),
-      jsx(RightPanel, { item: selectedItem, tab: rightTab, onTabChange: setRightTab, retryNote, onRetryNoteChange: setRetryNote, onRetrySubmit: handleRetrySubmit, retryBusy }),
+            ? jsx(CenterWorkspace, { item: selectedItem, decide, busy, zoom, onZoomChange: setZoom, onFullscreen: setFullscreen, onBack: setSelectedId, onApproveClick: () => setApproveOpen(true), onRejectClick: () => setRejectOpen(true), rejectOpen, rejectNote, onRejectNoteChange: setRejectNote, sendReject })
+            : jsx(RequestList, { items: visible, selectedId, onSelect: setSelectedId, needle }),
+      selectedItem && jsx(RightPanel, { item: selectedItem, tab: rightTab, onTabChange: setRightTab, retryNote, onRetryNoteChange: setRetryNote, onRetrySubmit: handleRetrySubmit, retryBusy }),
     ]}),
     jsx(FullscreenModal, { file: fullscreen, onClose: () => setFullscreen(null) }),
     selectedItem && jsx(ConfirmDialog, {
@@ -686,7 +674,7 @@ function InboxPane() {
 export default {
   id: ID,
   name: 'Approval Inbox',
-  description: 'Three-pane approval workspace: feed, preview, and retry studio.',
+  description: 'Single-column approval inbox: header, filters, request list, and the selected request in context.',
   defaultEnabled: true,
 
   register(ctx) {
