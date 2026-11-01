@@ -393,7 +393,20 @@ def _requests():
         dec = decisions.get(rec.get("msg_id"))
         status = "pending"
         if dec:
-            status = dec.get("decision", "decided")
+            # The decision log stores the verb the Founder pressed ("approve" /
+            # "reject"); the panel's filters, counts and status pills use the
+            # state ("approved" / "rejected"). Passing the verb straight through
+            # made decided rows render with a pending dot and left the Approved
+            # and Rejected tabs permanently at zero. Canonicalise here, once, so
+            # every consumer of this packet sees the same vocabulary.
+            _raw = str(dec.get("decision") or "").strip().lower()
+            status = {"approve": "approved", "approved": "approved",
+                      "reject": "rejected", "rejected": "rejected",
+                      "reget": "reget", "re-get": "reget", "rework": "reget"}.get(_raw, "decided")
+            # A rejection that asked for a new version is the Re-Get state: the
+            # decision verb is still "reject", the note is what makes it rework.
+            if status == "rejected" and re.search(r"re-?get|rework|retry", str(dec.get("note") or ""), re.I):
+                status = "reget"
         art = meta.get("artifact") or {}
         items.append({
             "msg_id": rec.get("msg_id"),

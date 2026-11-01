@@ -31,7 +31,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.7.2'
+const APP_VERSION = '0.7.3'
 
 let rest = null
 let storeGet = null
@@ -372,6 +372,15 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
   ] })
 }
 
+function normaliseStatus(status) {
+  // The packet's status must already be canonical; this guard keeps an older
+  // backend (or a raw decision verb) from putting a decided request back into
+  // the pending bucket, which is how a finished approval reappeared as new.
+  const s = String(status || '').trim().toLowerCase()
+  const map = { approve: 'approved', approved: 'approved', reject: 'rejected', rejected: 'rejected', reget: 'reget', 're-get': 'reget', rework: 'reget' }
+  return map[s] || s || 'pending'
+}
+
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'pending', label: 'Pending' },
@@ -624,27 +633,32 @@ function InboxPane() {
   const setNeedle = (v) => setPrefs({ ...prefs, q: v })
   const setFilter = (v) => setPrefs({ ...prefs, filter: v })
 
-  const pending = items.filter(i => i.status === 'pending')
+  // Canonical statuses, once, here. Every filter, count, pill and sort below
+  // reads from `rows`, so a decision verb can never land a finished request back
+  // in the pending bucket.
+  const rows = items.map(i => ({ ...i, status: normaliseStatus(i.status) }))
+
+  const pending = rows.filter(i => i.status === 'pending')
   const counts = {
-    all: items.length,
+    all: rows.length,
     pending: pending.length,
-    reget: items.filter(i => i.status === 'rejected' && i.decision && /re-get|rework|retry/i.test(i.decision.note || '')).length,
-    approved: items.filter(i => i.status === 'approved').length,
-    rejected: items.filter(i => i.status === 'rejected').length,
+    reget: rows.filter(i => i.status === 'reget').length,
+    approved: rows.filter(i => i.status === 'approved').length,
+    rejected: rows.filter(i => i.status === 'rejected').length,
   }
 
   const byNewest = (a, b) => String(b.ts || '').localeCompare(String(a.ts || ''))
-  let visible = items.filter(i => matches(i, needle)).sort(byNewest)
+  let visible = rows.filter(i => matches(i, needle)).sort(byNewest)
   if (filter === 'pending') visible = visible.filter(i => i.status === 'pending')
   if (filter === 'approved') visible = visible.filter(i => i.status === 'approved')
   if (filter === 'rejected') visible = visible.filter(i => i.status === 'rejected')
-  if (filter === 'reget') visible = visible.filter(i => i.status === 'rejected' && i.decision && /re-get|rework|retry/i.test(i.decision.note || ''))
+  if (filter === 'reget') visible = visible.filter(i => i.status === 'reget')
   if (filter === 'all') {
     const rank = (i) => (i.status === 'pending' ? 0 : 1)
     visible = [...visible].sort((a, b) => rank(a) - rank(b) || byNewest(a, b))
   }
 
-  const selectedItem = selectedId ? items.find(i => i.msg_id === selectedId) : null
+  const selectedItem = selectedId ? rows.find(i => i.msg_id === selectedId) : null
   const busy = decide.isPending || retryBusy
   const reload = () => { queryClient.invalidateQueries({ queryKey: [ID] }) }
 
