@@ -31,7 +31,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.7.0'
+const APP_VERSION = '0.7.1'
 
 let rest = null
 let storeGet = null
@@ -354,11 +354,22 @@ const FILTERS = [
   { id: 'rejected', label: 'Rejected' },
 ]
 
+function groupHeader(label, count) {
+  return jsxs('div', { className: 'mt-1 flex items-center gap-2 px-1 text-[0.625rem] font-semibold uppercase tracking-wide text-(--ui-text-quaternary)', children: [
+    jsx('span', { children: label }),
+    jsx('span', { children: String(count) }),
+  ] })
+}
+
 function FeedRow({ item, selected, onSelect }) {
   const decided = item.status !== 'pending'
   return jsxs('div', {
     className: `flex w-full min-w-0 cursor-pointer gap-2 rounded-md border border-transparent p-2 hover:bg-(--ui-row-hover-background)${selected ? ' bg-(--ui-row-active-background) border-(--ui-stroke-secondary)' : ''}${decided ? ' opacity-60' : ''}`,
     onClick: () => onSelect(item.msg_id),
+    role: 'button',
+    tabIndex: 0,
+    'aria-selected': !!selected,
+    onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(item.msg_id) } },
     children: [
       jsx('div', { className: 'flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border text-base', style: typeStyle(item.type), title: getTypeLabel(item.type), children:
         jsx('span', { className: `codicon ${typeIcon(item.type)}`, 'aria-hidden': 'true' }) }),
@@ -370,6 +381,7 @@ function FeedRow({ item, selected, onSelect }) {
         jsxs('div', { className: 'flex items-center gap-2', children: [
           jsx(StatusBadge, { status: decided ? item.status : 'pending' }),
           jsxs('span', { className: 'shrink-0 whitespace-nowrap rounded-sm bg-(--ui-bg-quaternary) px-1 py-0.5 text-xs font-bold text-(--ui-text-quaternary)', children: ['v', (item.artifact || {}).version || '?'] }),
+          item.owner ? jsx('span', { className: 'min-w-0 truncate text-xs text-(--ui-text-quaternary)', title: `${item.owner}${item.work_id ? ` · ${item.work_id}` : ''}`, children: item.owner }) : null,
         ]}),
       ]}),
     ]
@@ -384,9 +396,12 @@ function RequestList({ items, selectedId, onSelect, needle }) {
             title: needle ? 'No matching requests' : 'Nothing in this view',
             description: needle ? 'Try a different search term.' : 'Switch the filter back to All to see every request.',
           })
-        : jsx('div', { className: 'flex w-full min-w-0 flex-col gap-1 p-2', children:
-            items.map(it => jsx(FeedRow, { item: it, selected: it.msg_id === selectedId, onSelect, key: it.msg_id })),
-          })
+        : jsxs('div', { className: 'flex w-full min-w-0 flex-col gap-1 p-2', children: [
+            groupHeader('Needs decision', items.filter(i => i.status === 'pending').length),
+            ...items.filter(i => i.status === 'pending').map(it => jsx(FeedRow, { item: it, selected: it.msg_id === selectedId, onSelect, key: it.msg_id })),
+            items.some(i => i.status !== 'pending') ? groupHeader('Decided', items.filter(i => i.status !== 'pending').length) : null,
+            ...items.filter(i => i.status !== 'pending').map(it => jsx(FeedRow, { item: it, selected: it.msg_id === selectedId, onSelect, key: it.msg_id })),
+          ]})
     }),
   ] })
 }
