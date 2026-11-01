@@ -31,7 +31,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.7.3'
+const APP_VERSION = '0.7.4'
 
 let rest = null
 let storeGet = null
@@ -406,8 +406,7 @@ function FeedRow({ item, selected, onSelect }) {
     'aria-selected': !!selected,
     onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(item.msg_id) } },
     children: [
-      jsx('div', { className: 'flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border text-base', style: typeStyle(item.type), title: getTypeLabel(item.type), children:
-        jsx('span', { className: `codicon ${typeIcon(item.type)}`, 'aria-hidden': 'true' }) }),
+      jsx('span', { className: 'w-10 shrink-0 text-xs font-bold uppercase tracking-wide', style: { color: typeToken(item.type) }, title: getTypeLabel(item.type), children: getTypeLabel(item.type) }),
       jsxs('div', { className: 'flex min-w-0 flex-1 flex-col gap-1', children: [
         jsxs('div', { className: 'flex items-center justify-between gap-2', children: [
           jsx('span', { className: 'min-w-0 flex-1 truncate text-xs font-semibold', title: itemTitle(item), children: itemTitle(item) }),
@@ -467,7 +466,7 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
     jsxs('div', { className: 'flex w-full shrink-0 flex-col gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2', children: [
       jsxs('div', { className: 'flex min-w-0 items-center gap-2', children: [
         jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => onBack && onBack(null), 'aria-label': 'Back to the request list', children: '‹ Back' }),
-        jsx('span', { className: 'shrink-0 whitespace-nowrap rounded-sm border px-1.5 py-0.5 text-xs font-bold tracking-wide uppercase', style: typeStyle(item.type), children: getTypeLabel(item.type) }),
+        jsx('span', { className: 'shrink-0 text-xs font-bold uppercase tracking-wide', style: { color: typeToken(item.type) }, children: getTypeLabel(item.type) }),
         jsx('div', { className: 'min-w-0 flex-1 truncate text-sm font-semibold', title: itemTitle(item), children: itemTitle(item) }),
         jsx(StatusBadge, { status: decided ? item.status : 'pending' }),
       ]}),
