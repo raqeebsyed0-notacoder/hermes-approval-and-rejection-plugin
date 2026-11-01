@@ -31,7 +31,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.7.1'
+const APP_VERSION = '0.7.2'
 
 let rest = null
 let storeGet = null
@@ -275,6 +275,23 @@ function fmtSize(n) {
 
 const VIEWPORT = 'w-full max-w-full overflow-auto rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-tertiary) p-4'
 
+// The plugin's own backend namespace — the renderer carries the session, so a raw
+// URL is loadable where a data: URL is not (Electron refuses to render a PDF from
+// one). Used for the PDF reader instead of inlining megabytes of base64.
+const API_BASE = '/api/plugins/approval-inbox'
+function fileUrl(msgId, name) {
+  return `${API_BASE}/files/${encodeURIComponent(msgId || '')}/${encodeURIComponent(name || '')}`
+}
+
+// Transparent artwork (a white logo, a cut-out PNG) is invisible on the dark
+// surface. Every image therefore sits on a token-built contrast plate, the way an
+// asset viewer shows art on a transparency grid. No literal colour is introduced.
+const PLATE = 'grid place-items-center rounded-md border border-(--ui-stroke-secondary) p-1'
+const PLATE_STYLE = {
+  backgroundImage: 'repeating-conic-gradient(color-mix(in srgb, var(--ui-text-primary) 7%, transparent) 0% 25%, transparent 0% 50%)',
+  backgroundSize: '12px 12px',
+}
+
 function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
   const pv = usePreview(msgId, hasFiles)
   const [expanded, setExpanded] = useState(null)
@@ -305,12 +322,14 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
       jsx('span', { className: `codicon ${typeIcon(files[0].kind)} mt-0.5 shrink-0`, 'aria-hidden': 'true' }),
       jsx('span', { className: 'min-w-0 flex-1', children: copy }),
     ]}) : null,
-    big && big.kind === 'image' ? jsx('img', { className: 'w-full cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: big.data_url, alt: big.name, onClick: () => setExpanded(null) }) : null,
+    big && big.kind === 'image' ? jsx('div', { className: PLATE, style: PLATE_STYLE, children:
+      jsx('img', { className: 'w-full cursor-pointer rounded-sm', src: big.data_url, alt: big.name, onClick: () => setExpanded(null) }) }) : null,
     images.length > 0 ? jsx('div', { className: 'flex w-full flex-wrap gap-2', children:
       images.map(f => jsxs('div', { className: 'flex w-28 flex-col gap-1', children: [
-        jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: f.data_url, alt: f.name, title: `${f.name} · click to enlarge`,
-          onClick: () => setExpanded(expanded === f.name ? null : f.name),
-          onLoad: (e) => setDims(d => ({ ...d, [f.name]: `${e.target.naturalWidth}×${e.target.naturalHeight}` })) }),
+        jsx('div', { className: PLATE, style: PLATE_STYLE, children:
+          jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-sm', src: f.data_url, alt: f.name, title: `${f.name} · click to enlarge`,
+            onClick: () => setExpanded(expanded === f.name ? null : f.name),
+            onLoad: (e) => setDims(d => ({ ...d, [f.name]: `${e.target.naturalWidth}×${e.target.naturalHeight}` })) }) }),
         jsx('span', { className: 'w-24 truncate text-[0.625rem] text-(--ui-text-quaternary)', title: `${f.name} · ${fmtSize(f.size)}`,
           children: [dims[f.name] ? `${dims[f.name]} · ` : '', f.content_type === 'image/svg+xml' ? 'SVG' : fmtSize(f.size)].join('') }),
       ]}, f.name))
@@ -324,9 +343,16 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
       jsxs('div', { className: 'flex items-center gap-2', children: [
         f.thumb_url ? jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: f.thumb_url, alt: `${f.name} first page`, title: `${f.name}${f.pages ? ` · ${f.pages} pages` : ''} · tap to read`, onClick: () => setExpanded(expanded === f.name ? null : f.name) }) : null,
         jsx('span', { className: 'min-w-0 flex-1 break-all text-xs text-(--ui-text-secondary)', children: `${f.name}${f.pages ? ` · ${f.pages}p` : ''} · ${fmtSize(f.size)}` }),
-        f.data_url ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Read' }) : null,
+      jsx('div', { className: 'flex items-center gap-1.5', children: [
+        jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => window.open(fileUrl(msgId, f.name), '_blank'), children: f.pages ? `Open (${f.pages}p)` : 'Open' }),
+        f.data_url ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Read here' }) : null,
       ] }),
-      expanded === f.name && f.data_url ? jsx('embed', { className: 'w-full rounded-sm border border-(--ui-stroke-tertiary)', style: { height: '24rem' }, src: f.data_url, type: 'application/pdf' }) : null,
+      ] }),
+      expanded === f.name && f.data_url ? jsxs('div', { className: 'flex w-full flex-col gap-2', children: [
+        jsx('object', { type: 'application/pdf', data: fileUrl(msgId, f.name), className: 'w-full rounded-sm border border-(--ui-stroke-tertiary)', style: { height: '24rem' }, children:
+          jsx('div', { className: 'p-3 text-xs text-(--ui-text-secondary)', children: 'This build cannot display the PDF inline. Use Open to read it.' }) }),
+        jsxs('span', { className: 'text-[0.625rem] text-(--ui-text-quaternary)', children: `${f.pages || '?'} page(s) · ${fmtSize(f.size)} · opens in your reader` }),
+      ]}) : null,
     ], key: f.name })),
     ...mds.map(f => jsxs('div', { className: 'w-full overflow-hidden rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary)', children: [
       jsxs('div', { className: 'flex items-center justify-between gap-2 border-b border-(--ui-stroke-tertiary) px-2 py-1', children: [
