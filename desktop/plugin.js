@@ -31,7 +31,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.6.0'
+const APP_VERSION = '0.6.1'
 
 let rest = null
 let storeGet = null
@@ -308,18 +308,18 @@ const FILTERS = [
 function FeedRow({ item, selected, onSelect }) {
   const decided = item.status !== 'pending'
   return jsxs('div', {
-    className: `flex cursor-pointer gap-2 rounded-md border border-transparent p-2 hover:bg-(--ui-row-hover-background)${selected ? ' bg-(--ui-row-active-background) border-(--ui-stroke-secondary)' : ''}${decided ? ' opacity-60' : ''}`,
+    className: `flex w-full min-w-0 cursor-pointer gap-2 rounded-md border border-transparent p-2 hover:bg-(--ui-row-hover-background)${selected ? ' bg-(--ui-row-active-background) border-(--ui-stroke-secondary)' : ''}${decided ? ' opacity-60' : ''}`,
     onClick: () => onSelect(item.msg_id),
     children: [
       jsx('div', { className: 'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-xs font-bold', style: typeStyle(item.type), children: getTypeLabel(item.type) }),
       jsxs('div', { className: 'flex min-w-0 flex-1 flex-col gap-1', children: [
         jsxs('div', { className: 'flex items-center justify-between gap-2', children: [
-          jsx('span', { className: 'text-xs font-semibold break-words', children: itemTitle(item) }),
+          jsx('span', { className: 'min-w-0 flex-1 truncate text-xs font-semibold', title: itemTitle(item), children: itemTitle(item) }),
           jsx('span', { className: 'text-xs whitespace-nowrap text-(--ui-text-quaternary)', title: absTime(item.ts), children: relTime(item.ts) || absTime(item.ts) }),
         ]}),
         jsxs('div', { className: 'flex items-center gap-2', children: [
           jsx(StatusBadge, { status: decided ? item.status : 'pending' }),
-          jsxs('span', { className: 'rounded-sm bg-(--ui-bg-quaternary) px-1 py-0.5 text-xs font-bold text-(--ui-text-quaternary)', children: ['v', (item.artifact || {}).version || '?'] }),
+          jsxs('span', { className: 'shrink-0 whitespace-nowrap rounded-sm bg-(--ui-bg-quaternary) px-1 py-0.5 text-xs font-bold text-(--ui-text-quaternary)', children: ['v', (item.artifact || {}).version || '?'] }),
         ]}),
       ]}),
     ]
@@ -334,7 +334,7 @@ function RequestList({ items, selectedId, onSelect, needle }) {
             title: needle ? 'No matching requests' : 'Nothing in this view',
             description: needle ? 'Try a different search term.' : 'Switch the filter back to All to see every request.',
           })
-        : jsx('div', { className: 'flex flex-col gap-1 p-2', children:
+        : jsx('div', { className: 'flex w-full min-w-0 flex-col gap-1 p-2', children:
             items.map(it => jsx(FeedRow, { item: it, selected: it.msg_id === selectedId, onSelect, key: it.msg_id })),
           })
     }),
@@ -367,8 +367,8 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
     jsxs('div', { className: 'flex w-full shrink-0 flex-col gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2', children: [
       jsxs('div', { className: 'flex min-w-0 items-center gap-2', children: [
         jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => onBack && onBack(null), 'aria-label': 'Back to the request list', children: '‹ Back' }),
-        jsx('span', { className: 'rounded-sm border px-1.5 py-0.5 text-xs font-bold tracking-wide uppercase', style: typeStyle(item.type), children: getTypeLabel(item.type) }),
-        jsx('div', { className: 'min-w-0 flex-1 text-sm font-semibold break-words', children: itemTitle(item) }),
+        jsx('span', { className: 'shrink-0 whitespace-nowrap rounded-sm border px-1.5 py-0.5 text-xs font-bold tracking-wide uppercase', style: typeStyle(item.type), children: getTypeLabel(item.type) }),
+        jsx('div', { className: 'min-w-0 flex-1 truncate text-sm font-semibold', title: itemTitle(item), children: itemTitle(item) }),
         jsx(StatusBadge, { status: decided ? item.status : 'pending' }),
       ]}),
       jsx('div', { className: 'min-w-0 text-xs text-(--ui-text-secondary)', children:
@@ -397,7 +397,7 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
     jsx('div', { className: 'flex flex-1 flex-col items-center gap-3 overflow-auto p-4', children: pv.isLoading && hasFiles ? jsx('div', { className: 'grid h-full place-items-center p-4', children: jsx(GlyphSpinner, {}) }) : (
       jsxs('div', { className: 'flex w-full flex-col', children: [
         jsxs('div', { className: 'flex items-center justify-between gap-2 border-b border-(--ui-stroke-tertiary) pb-2', children: [
-          jsx('span', { className: 'text-xs font-semibold tracking-wide uppercase text-(--ui-text-quaternary)', children: `${(item.type || 'artifact').toUpperCase()} Viewport` }),
+          jsx('span', { className: 'shrink-0 whitespace-nowrap text-xs font-semibold tracking-wide uppercase text-(--ui-text-quaternary)', children: `${(item.type || 'artifact').toUpperCase()} Viewport` }),
           (mainImage || mainVideo) ? jsxs('div', { className: 'flex items-center gap-1', children: [
             jsx(Button, { size: 'icon-xs', variant: 'ghost', onClick: () => onZoomChange(Math.max(0.5, zoom - 0.1)), 'aria-label': 'Zoom out', children: '−' }),
             jsx(Button, { size: 'icon-xs', variant: 'ghost', onClick: () => onZoomChange(Math.min(2.5, zoom + 0.1)), 'aria-label': 'Zoom in', children: '+' }),
