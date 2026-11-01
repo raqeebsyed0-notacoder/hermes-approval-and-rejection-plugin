@@ -26,7 +26,7 @@ TRIGGER_BOARD = os.environ.get("APPROVAL_INBOX_BOARD", "default")
 
 # Attachment policy: what the inbox will carry and show inline.
 ALLOWED_TYPES = {
-    "image/png", "image/jpeg", "image/webp", "image/gif",
+    "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
     "video/mp4", "video/webm",
     "application/pdf",
     "text/markdown", "text/html",
@@ -153,6 +153,17 @@ def _sniff(content_type, raw):
         return len(raw) >= 12 and (raw[4:8] == b"ftyp" or raw[:4] == b"\x1a\x45\xdf\xa3")
     if content_type == "application/pdf":
         return raw[:5] == b"%PDF-"
+    if content_type == "image/svg+xml":
+        # Vector art is XML text, so it is validated like the other text types
+        # (valid UTF-8, no NUL bytes) plus its own root element. Without this
+        # branch an SVG is rejected as "attachment bytes do not match".
+        try:
+            txt = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        if b"\x00" in raw:
+            return False
+        return "<svg" in txt[:4096]
     if content_type in ("text/markdown", "text/html"):
         try:
             raw.decode("utf-8")
@@ -185,6 +196,8 @@ def _guess_type(name):
     low = (name or "").lower()
     if low.endswith(".png"):
         return "image/png"
+    if low.endswith(".svg"):
+        return "image/svg+xml"
     if low.endswith((".jpg", ".jpeg")):
         return "image/jpeg"
     if low.endswith(".webp"):

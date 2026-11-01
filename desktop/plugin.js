@@ -31,7 +31,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.6.1'
+const APP_VERSION = '0.7.0'
 
 let rest = null
 let storeGet = null
@@ -155,6 +155,43 @@ function getTypeLabel(type) {
   return map[t] || (t.length <= 4 ? t.toUpperCase() : t.charAt(0).toUpperCase() + t.slice(1))
 }
 
+function typeIcon(type) {
+  const t = (type || 'artifact').toLowerCase()
+  const map = {
+    pdf: 'codicon-file-pdf', md: 'codicon-markdown', html: 'codicon-code',
+    png: 'codicon-file-media', jpg: 'codicon-file-media', jpeg: 'codicon-file-media',
+    svg: 'codicon-file-media', mp4: 'codicon-play-circle', reel: 'codicon-play-circle',
+    post: 'codicon-edit', task: 'codicon-checklist', excel: 'codicon-table',
+    release: 'codicon-tag', artifact: 'codicon-file',
+  }
+  return map[t] || 'codicon-file'
+}
+
+// Approval text per artifact format: what the reviewer is looking at, and what
+// approving it actually does. One line, format-specific.
+const FORMAT_COPY = {
+  'application/pdf': 'PDF document — check the version and the page count before approving.',
+  'text/html': 'HTML page — open the rendered page; approving publishes this build.',
+  'image/png': 'Raster image (PNG) — check resolution and legibility at full size; approving releases this asset.',
+  'image/jpeg': 'Raster image (JPG) — check for compression artifacts at full size; approving releases this asset.',
+  'image/webp': 'Raster image (WEBP) — check it at full size; approving releases this asset.',
+  'image/gif': 'Animated image (GIF) — check the loop; approving releases this asset.',
+  'image/svg+xml': 'Vector graphic (SVG) — scales to any size; approving releases this graphic.',
+  'text/markdown': 'Markdown document — read it end to end; approving publishes this text.',
+  'video/mp4': 'Video (MP4) — watch the cut to the end before approving.',
+  'video/webm': 'Video (WEBM) — watch the cut to the end before approving.',
+}
+
+function formatCopy(contentType) {
+  return FORMAT_COPY[contentType] || ''
+}
+
+function fmtDuration(sec) {
+  if (!Number.isFinite(sec) || sec <= 0) return ''
+  const m = Math.floor(sec / 60)
+  return `${m}:${String(Math.round(sec % 60)).padStart(2, '0')}`
+}
+
 function showToast(message, kind = 'info') {
   host?.notify?.({ kind, message })
 }
@@ -241,6 +278,7 @@ const VIEWPORT = 'w-full max-w-full overflow-auto rounded-md border border-(--ui
 function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
   const pv = usePreview(msgId, hasFiles)
   const [expanded, setExpanded] = useState(null)
+  const [dims, setDims] = useState({})
   if (!hasFiles || pv.isLoading) return null
   if (pv.isError) {
     const status = pv.error && (pv.error.status || pv.error.statusCode)
@@ -261,12 +299,27 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
   const htmls = files.filter(f => f.kind === 'html' && f.data_url)
   const rest = files.filter(f => !f.data_url && !['pdf', 'md', 'html'].includes(f.kind))
   const big = expanded ? files.find(f => f.name === expanded) : null
+  const copy = formatCopy(files[0] && files[0].content_type)
   return jsxs('div', { className: 'flex w-full flex-col gap-3', children: [
+    copy ? jsxs('div', { className: 'flex w-full items-start gap-2 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary) p-2 text-xs text-(--ui-text-secondary)', children: [
+      jsx('span', { className: `codicon ${typeIcon(files[0].kind)} mt-0.5 shrink-0`, 'aria-hidden': 'true' }),
+      jsx('span', { className: 'min-w-0 flex-1', children: copy }),
+    ]}) : null,
     big && big.kind === 'image' ? jsx('img', { className: 'w-full cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: big.data_url, alt: big.name, onClick: () => setExpanded(null) }) : null,
-    images.length > 0 ? jsx('div', { className: 'flex flex-wrap gap-2', children:
-      images.map(f => jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: f.data_url, alt: f.name, title: `${f.name} · tap to enlarge`, onClick: () => setExpanded(expanded === f.name ? null : f.name), key: f.name }))
+    images.length > 0 ? jsx('div', { className: 'flex w-full flex-wrap gap-2', children:
+      images.map(f => jsxs('div', { className: 'flex w-28 flex-col gap-1', children: [
+        jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: f.data_url, alt: f.name, title: `${f.name} · click to enlarge`,
+          onClick: () => setExpanded(expanded === f.name ? null : f.name),
+          onLoad: (e) => setDims(d => ({ ...d, [f.name]: `${e.target.naturalWidth}×${e.target.naturalHeight}` })) }),
+        jsx('span', { className: 'w-24 truncate text-[0.625rem] text-(--ui-text-quaternary)', title: `${f.name} · ${fmtSize(f.size)}`,
+          children: [dims[f.name] ? `${dims[f.name]} · ` : '', f.content_type === 'image/svg+xml' ? 'SVG' : fmtSize(f.size)].join('') }),
+      ]}, f.name))
     }) : null,
-    ...videos.map(f => jsx('video', { className: 'w-full rounded-md border border-(--ui-stroke-secondary)', src: f.data_url, controls: true, preload: 'metadata', key: f.name })),
+    ...videos.map(f => jsxs('div', { className: 'flex w-full flex-col gap-1', children: [
+      jsx('video', { className: 'w-full rounded-md border border-(--ui-stroke-secondary)', src: f.data_url, controls: true, preload: 'metadata',
+        onLoadedMetadata: (e) => setDims(d => ({ ...d, [f.name]: fmtDuration(e.target.duration) })) }),
+      jsx('span', { className: 'text-[0.625rem] text-(--ui-text-quaternary)', children: [f.name, dims[f.name] ? ` · ${dims[f.name]}` : '', ` · ${fmtSize(f.size)}`].join('') }),
+    ]}, f.name)),
     ...pdfs.map(f => jsxs('div', { className: 'flex flex-col gap-2 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary) p-2', children: [
       jsxs('div', { className: 'flex items-center gap-2', children: [
         f.thumb_url ? jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: f.thumb_url, alt: `${f.name} first page`, title: `${f.name}${f.pages ? ` · ${f.pages} pages` : ''} · tap to read`, onClick: () => setExpanded(expanded === f.name ? null : f.name) }) : null,
@@ -280,18 +333,14 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
         jsx('span', { className: 'text-xs font-semibold tracking-wide uppercase text-(--ui-text-quaternary)', children: 'MARKDOWN' }),
         jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => { if (expanded === f.name) { setExpanded(null); } else { onFullscreen(f); } }, children: expanded === f.name ? 'Close' : 'Fullscreen' }),
       ] }),
-      expanded === f.name
-        ? jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(f.data_url)) } })
-        : jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(f.data_url)) } })
+      jsx('div', { className: expanded === f.name ? VIEWPORT : `${VIEWPORT} max-h-40 overflow-hidden`, dangerouslySetInnerHTML: { __html: renderSimpleMd(decodeDataUrl(f.data_url)) } })
     ], key: f.name })),
     ...htmls.map(f => jsxs('div', { className: 'w-full overflow-hidden rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary)', children: [
       jsxs('div', { className: 'flex items-center justify-between gap-2 border-b border-(--ui-stroke-tertiary) px-2 py-1', children: [
         jsx('span', { className: 'text-xs font-semibold tracking-wide uppercase text-(--ui-text-quaternary)', children: 'HTML' }),
         jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => { if (expanded === f.name) { setExpanded(null); } else { onFullscreen(f); } }, children: expanded === f.name ? 'Close' : 'Fullscreen' }),
       ] }),
-      expanded === f.name
-        ? jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: decodeDataUrl(f.data_url) } })
-        : jsx('div', { className: VIEWPORT, dangerouslySetInnerHTML: { __html: decodeDataUrl(f.data_url) } })
+      jsx('div', { className: expanded === f.name ? VIEWPORT : `${VIEWPORT} max-h-40 overflow-hidden`, dangerouslySetInnerHTML: { __html: decodeDataUrl(f.data_url) } })
     ], key: f.name })),
     ...rest.map(f => jsx('div', { className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary) p-2 text-xs text-(--ui-text-secondary)', children: `${f.name} · ${fmtSize(f.size)} (too large to preview inline)`, key: f.name })),
   ] })
@@ -311,7 +360,8 @@ function FeedRow({ item, selected, onSelect }) {
     className: `flex w-full min-w-0 cursor-pointer gap-2 rounded-md border border-transparent p-2 hover:bg-(--ui-row-hover-background)${selected ? ' bg-(--ui-row-active-background) border-(--ui-stroke-secondary)' : ''}${decided ? ' opacity-60' : ''}`,
     onClick: () => onSelect(item.msg_id),
     children: [
-      jsx('div', { className: 'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-xs font-bold', style: typeStyle(item.type), children: getTypeLabel(item.type) }),
+      jsx('div', { className: 'flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border text-base', style: typeStyle(item.type), title: getTypeLabel(item.type), children:
+        jsx('span', { className: `codicon ${typeIcon(item.type)}`, 'aria-hidden': 'true' }) }),
       jsxs('div', { className: 'flex min-w-0 flex-1 flex-col gap-1', children: [
         jsxs('div', { className: 'flex items-center justify-between gap-2', children: [
           jsx('span', { className: 'min-w-0 flex-1 truncate text-xs font-semibold', title: itemTitle(item), children: itemTitle(item) }),
