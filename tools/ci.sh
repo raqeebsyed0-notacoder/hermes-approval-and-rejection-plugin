@@ -18,6 +18,7 @@ node --input-type=module --check < desktop/plugin.js && echo ESM_OK
 echo "== UI smoke =="
 node tests/ui-smoke/surface-check.mjs
 node tests/ui-smoke/load-smoke.mjs
+node tests/ui-smoke/render-check.mjs
 echo "== validate =="
 hermes plugins validate "$PWD"
 echo "CI PASS"

@@ -31,7 +31,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.7.8'
+const APP_VERSION = '0.8.0'
 
 let rest = null
 let storeGet = null
@@ -275,9 +275,9 @@ function fmtSize(n) {
 
 const VIEWPORT = 'w-full max-w-full overflow-auto rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-tertiary) p-4'
 
-// The plugin's own backend namespace — the renderer carries the session, so a raw
-// URL is loadable where a data: URL is not (Electron refuses to render a PDF from
-// one). Used for the PDF reader instead of inlining megabytes of base64.
+// The plugin's own backend namespace. Kept only for the documented file route —
+// note that a plugin may render absolute http(s): or data: URLs only, so nothing
+// here is used as a rendered src.
 const API_BASE = '/api/plugins/approval-inbox'
 function fileUrl(msgId, name) {
   return `${API_BASE}/files/${encodeURIComponent(msgId || '')}/${encodeURIComponent(name || '')}`
@@ -344,14 +344,19 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
         f.thumb_url ? jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: f.thumb_url, alt: `${f.name} first page`, title: `${f.name}${f.pages ? ` · ${f.pages} pages` : ''} · tap to read`, onClick: () => setExpanded(expanded === f.name ? null : f.name) }) : null,
         jsx('span', { className: 'min-w-0 flex-1 break-all text-xs text-(--ui-text-secondary)', children: `${f.name}${f.pages ? ` · ${f.pages}p` : ''} · ${fmtSize(f.size)}` }),
       jsx('div', { className: 'flex items-center gap-1.5', children: [
-        jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => window.open(fileUrl(msgId, f.name), '_blank'), children: f.pages ? `Open (${f.pages}p)` : 'Open' }),
+        // A plugin may only render absolute http(s): or data: URLs — a relative
+        // path renders nothing and only warns. window.open on a relative path is a
+        // dead click in Electron, which is why the previous Open button did nothing.
+        // The bytes are already here as a data: URL, so the save is direct.
+        f.data_url ? jsx('a', { href: f.data_url, download: f.name, className: 'shrink-0', children:
+          jsx(Button, { size: 'xs', variant: 'ghost', asChild: false, children: f.pages ? `Download (${f.pages}p)` : 'Download' }) }) : null,
         f.data_url ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Read here' }) : null,
       ] }),
       ] }),
       expanded === f.name && f.data_url ? jsxs('div', { className: 'flex w-full flex-col gap-2', children: [
-        jsx('object', { type: 'application/pdf', data: fileUrl(msgId, f.name), className: 'w-full rounded-sm border border-(--ui-stroke-tertiary)', style: { height: '24rem' }, children:
-          jsx('div', { className: 'p-3 text-xs text-(--ui-text-secondary)', children: 'This build cannot display the PDF inline. Use Open to read it.' }) }),
-        jsxs('span', { className: 'text-[0.625rem] text-(--ui-text-quaternary)', children: `${f.pages || '?'} page(s) · ${fmtSize(f.size)} · opens in your reader` }),
+        jsx('object', { type: 'application/pdf', data: f.data_url, className: 'w-full rounded-sm border border-(--ui-stroke-tertiary)', style: { height: '24rem' }, children:
+          jsx('div', { className: 'p-3 text-xs text-(--ui-text-secondary)', children: 'This build cannot paint the PDF inline. Use Download, then open it in your reader.' }) }),
+        jsxs('span', { className: 'text-[0.625rem] text-(--ui-text-quaternary)', children: `${f.pages || '?'} page(s) · ${fmtSize(f.size)} · page 1 shown above` }),
       ]}) : null,
     ], key: f.name })),
     ...mds.map(f => jsxs('div', { className: 'w-full overflow-hidden rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary)', children: [
@@ -802,6 +807,10 @@ export default {
   name: 'Approval Inbox',
   description: 'Single-column approval inbox: header, filters, request list, and the selected request in context.',
   defaultEnabled: true,
+
+  // Testability hook: the render check mounts these directly (the host ignores
+  // extra exports). No behaviour changes.
+  __test: { FeedRow, RequestList, PreviewBlock, typeToken, normaliseStatus, groupHeader },
 
   register(ctx) {
     rest = ctx.rest
