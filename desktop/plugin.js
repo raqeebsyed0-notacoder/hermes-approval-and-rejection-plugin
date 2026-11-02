@@ -31,7 +31,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.7.5'
+const APP_VERSION = '0.7.6'
 
 let rest = null
 let storeGet = null
@@ -406,14 +406,14 @@ function FeedRow({ item, selected, onSelect }) {
     'aria-selected': !!selected,
     onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(item.msg_id) } },
     children: [
-      jsx('span', { className: 'min-w-[2.5rem] shrink-0 whitespace-nowrap text-xs font-bold uppercase tracking-wide', style: { color: typeToken(item.type) }, title: getTypeLabel(item.type), children: getTypeLabel(item.type) }),
       jsxs('div', { className: 'flex min-w-0 flex-1 flex-col gap-1', children: [
-        jsxs('div', { className: 'flex items-center justify-between gap-2', children: [
+        jsxs('div', { className: 'flex min-w-0 items-center justify-between gap-2', children: [
           jsx('span', { className: 'min-w-0 flex-1 truncate text-xs font-semibold', title: itemTitle(item), children: itemTitle(item) }),
-          jsx('span', { className: 'text-xs whitespace-nowrap text-(--ui-text-quaternary)', title: absTime(item.ts), children: relTime(item.ts) || absTime(item.ts) }),
+          jsx('span', { className: 'shrink-0 whitespace-nowrap text-xs text-(--ui-text-quaternary)', title: absTime(item.ts), children: relTime(item.ts) || absTime(item.ts) }),
         ]}),
-        jsxs('div', { className: 'flex items-center gap-2', children: [
+        jsxs('div', { className: 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1', children: [
           jsx(StatusBadge, { status: decided ? item.status : 'pending' }),
+          jsx('span', { className: 'shrink-0 whitespace-nowrap text-xs font-bold uppercase tracking-wide', style: { color: typeToken(item.type) }, children: getTypeLabel(item.type) }),
           jsxs('span', { className: 'shrink-0 whitespace-nowrap rounded-sm bg-(--ui-bg-quaternary) px-1 py-0.5 text-xs font-bold text-(--ui-text-quaternary)', children: ['v', (item.artifact || {}).version || '?'] }),
           item.owner ? jsx('span', { className: 'min-w-0 truncate text-xs text-(--ui-text-quaternary)', title: `${item.owner}${item.work_id ? ` · ${item.work_id}` : ''}`, children: item.owner }) : null,
         ]}),
