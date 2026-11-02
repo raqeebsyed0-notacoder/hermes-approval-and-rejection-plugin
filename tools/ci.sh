@@ -19,6 +19,7 @@ echo "== UI smoke =="
 node tests/ui-smoke/surface-check.mjs
 node tests/ui-smoke/load-smoke.mjs
 node tests/ui-smoke/render-check.mjs
+node tests/ui-smoke/action-check.mjs
 echo "== validate =="
 hermes plugins validate "$PWD"
 echo "CI PASS"

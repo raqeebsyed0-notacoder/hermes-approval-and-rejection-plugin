@@ -32,7 +32,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.9.0'
+const APP_VERSION = '0.9.1'
 
 let rest = null
 let storeGet = null
@@ -581,7 +581,7 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
           jsxs('h3', { className: 'mb-1 text-xs font-semibold text-(--ui-text-primary)', children: ['Context: ', itemTitle(item)] }),
           renderSimpleMd(item.next_action || ''),
         ]}) : null,
-        hasFiles ? jsx('div', { className: 'mt-2 w-full', children: jsx(PreviewBlock, { msgId, hasFiles: true, onFullscreen }) }) : null,
+        hasFiles ? jsx('div', { className: 'mt-2 w-full', style: { zoom: zoom }, children: jsx(PreviewBlock, { msgId, hasFiles: true, onFullscreen }) }) : null,
       ] })
     )}),
   ] })
@@ -702,8 +702,11 @@ function InboxPane() {
 
   const needle = prefs.q || ''
   const filter = prefs.filter || 'all'
-  const setNeedle = (v) => setPrefs({ ...prefs, q: v })
-  const setFilter = (v) => setPrefs({ ...prefs, filter: v })
+  // Functional updates: two prefs changes in one tick (typing a search then tapping a
+  // filter before React commits) would otherwise each spread a stale snapshot and
+  // silently revert the other field.
+  const setNeedle = (v) => setPrefs(p => ({ ...p, q: v }))
+  const setFilter = (v) => setPrefs(p => ({ ...p, filter: v }))
 
   // Canonical statuses, once, here. Every filter, count, pill and sort below
   // reads from `rows`, so a decision verb can never land a finished request back
