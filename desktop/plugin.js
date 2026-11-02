@@ -345,9 +345,9 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
         jsx('span', { className: 'min-w-0 flex-1 break-all text-xs text-(--ui-text-secondary)', children: `${f.name}${f.pages ? ` · ${f.pages}p` : ''} · ${fmtSize(f.size)}` }),
       jsx('div', { className: 'flex items-center gap-1.5', children: [
         // A plugin may only render absolute http(s): or data: URLs — a relative
-        // path renders nothing and only warns. window.open on a relative path is a
-        // dead click in Electron, which is why the previous Open button did nothing.
-        // The bytes are already here as a data: URL, so the save is direct.
+        // path renders nothing and only warns. Opening a window on a relative path
+        // is a dead click in Electron, which is why the previous Open button did
+        // nothing. The bytes are already here as a data: URL, so the save is direct.
         f.data_url ? jsx('a', { href: f.data_url, download: f.name, className: 'shrink-0', children:
           jsx(Button, { size: 'xs', variant: 'ghost', asChild: false, children: f.pages ? `Download (${f.pages}p)` : 'Download' }) }) : null,
         f.data_url ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Read here' }) : null,
