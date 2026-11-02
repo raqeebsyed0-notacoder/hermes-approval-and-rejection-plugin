@@ -27,11 +27,11 @@ import {
   useMutation, useQuery,
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.7.6'
+const APP_VERSION = '0.7.7'
 
 let rest = null
 let storeGet = null
@@ -398,8 +398,13 @@ function groupHeader(label, count) {
 
 function FeedRow({ item, selected, onSelect }) {
   const decided = item.status !== 'pending'
+  // Keyboard navigation moves the selection; the list follows it without the
+  // reviewer having to reach for the scrollbar.
+  const ref = useRef(null)
+  useEffect(() => { if (selected && ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }) }, [selected])
   return jsxs('div', {
-    className: `flex w-full min-w-0 cursor-pointer gap-2 rounded-md border border-transparent p-2 hover:bg-(--ui-row-hover-background)${selected ? ' bg-(--ui-row-active-background) border-(--ui-stroke-secondary)' : ''}${decided ? ' opacity-60' : ''}`,
+    ref,
+    className: `flex w-full min-w-0 cursor-pointer gap-2 rounded-md border border-transparent p-2 outline-none hover:bg-(--ui-row-hover-background) focus-visible:outline focus-visible:outline-1 focus-visible:outline-(--ui-accent)${selected ? ' bg-(--ui-row-active-background) border-(--ui-stroke-secondary)' : ''}${decided ? ' opacity-60' : ''}`,
     onClick: () => onSelect(item.msg_id),
     role: 'button',
     tabIndex: 0,
@@ -423,7 +428,17 @@ function FeedRow({ item, selected, onSelect }) {
 }
 
 function RequestList({ items, selectedId, onSelect, needle }) {
-  return jsxs('div', { className: 'flex w-full min-w-0 flex-col bg-(--ui-sidebar-surface-background)', children: [
+  // Arrow keys walk the list the reviewer is looking at, in the order shown.
+  const move = (delta) => {
+    if (!items.length) return
+    const i = items.findIndex(it => it.msg_id === selectedId)
+    const next = i < 0 ? (delta > 0 ? 0 : items.length - 1) : Math.max(0, Math.min(items.length - 1, i + delta))
+    onSelect(items[next].msg_id)
+  }
+  return jsxs('div', { className: 'flex w-full min-w-0 flex-col bg-(--ui-sidebar-surface-background)', onKeyDown: (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(1) }
+    if (e.key === 'ArrowUp') { e.preventDefault(); move(-1) }
+  }, children: [
     jsx(ScrollArea, { className: 'w-full overflow-auto', children:
       items.length === 0
         ? jsx(EmptyState, {
@@ -724,7 +739,9 @@ function InboxPane() {
       ? { title: 'Nothing here yet', description: 'Approval requests appear here as soon as your lanes raise one.' }
       : { title: 'Nothing in this view', description: 'Switch the filter back to All to see every request.' }
 
-  return jsxs('div', { className: 'flex h-full min-h-0 flex-col text-(--ui-text-primary)', children: [
+  return jsxs('div', { className: 'flex h-full min-h-0 w-full min-w-0 flex-col text-(--ui-text-primary)',
+    onKeyDown: (e) => { if (e.key === 'Escape' && selectedId) { e.preventDefault(); setSelectedId(null) } },
+    children: [
     jsxs('div', { className: 'flex w-full shrink-0 flex-wrap items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2', children: [
       jsx(Button, { size: 'sm', variant: 'ghost', className: 'font-semibold', onClick: () => { if (host?.navigate) host.navigate(PAGE_PATH) }, children: 'Approval Inbox' }),
       jsx(Badge, { variant: 'outline', children: `${counts.pending} pending` }),
