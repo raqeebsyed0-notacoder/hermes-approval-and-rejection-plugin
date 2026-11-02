@@ -3,8 +3,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-// Proven surface = exactly what hermes-newswire (working, same Desktop) imports.
-const PROVEN = ['Badge','Button','ConfirmDialog','Dialog','DialogContent','DialogDescription','DialogFooter','DialogHeader','DialogTitle','EmptyState','ErrorState','GlyphSpinner','host','Input','PALETTE_AREA','ROUTES_AREA','ScrollArea','SearchField','SegmentedControl','Separator','SIDEBAR_NAV_AREA','Switch','atom','queryClient','useMutation','useQuery','useValue']
+// Proven surface = exactly what hermes-newswire (working, same Desktop) imports,
+// plus names verified against the SDK's own export list and the app's own bundled
+// plugins: `captureGatewayFileDownload` is exported at apps/desktop/src/sdk/index.ts
+// and imported by the app's kanban plugin (apps/desktop/src/plugins/kanban/api.ts).
+const PROVEN = ['Badge','Button','ConfirmDialog','Dialog','DialogContent','DialogDescription','DialogFooter','DialogHeader','DialogTitle','EmptyState','ErrorState','GlyphSpinner','host','Input','PALETTE_AREA','ROUTES_AREA','ScrollArea','SearchField','SegmentedControl','Separator','SIDEBAR_NAV_AREA','Switch','atom','captureGatewayFileDownload','queryClient','useMutation','useQuery','useValue']
 const src = readFileSync(join(__dirname, '..', '..', 'desktop', 'plugin.js'), 'utf8')
 const needed = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*'@hermes\/plugin-sdk'/g)].flatMap(m => m[1].split(',').map(s => s.trim()).filter(Boolean))
 console.log('NEEDS:', JSON.stringify(needed))

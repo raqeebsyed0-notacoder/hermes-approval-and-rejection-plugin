@@ -28,7 +28,7 @@ const PLUGIN = process.env.RENDER_CHECK_PLUGIN || join(__dirname, '..', '..', 'd
 const TMP = join(__dirname, '.tmp-render')
 mkdirSync(TMP, { recursive: true })
 
-const PROVEN_SDK = ['Badge','Button','ConfirmDialog','EmptyState','ErrorState','GlyphSpinner','host','Input','PALETTE_AREA','ROUTES_AREA','ScrollArea','SearchField','SegmentedControl','SIDEBAR_NAV_AREA','queryClient','useMutation','useQuery']
+const PROVEN_SDK = ['Badge','Button','ConfirmDialog','EmptyState','ErrorState','GlyphSpinner','captureGatewayFileDownload','host','Input','PALETTE_AREA','ROUTES_AREA','ScrollArea','SearchField','SegmentedControl','SIDEBAR_NAV_AREA','queryClient','useMutation','useQuery']
 const AREAS = { PALETTE_AREA: 'palette', ROUTES_AREA: 'routes', SIDEBAR_NAV_AREA: 'sidebar.nav' }
 
 const ITEMS = [
@@ -37,17 +37,19 @@ const ITEMS = [
   { msg_id: 'fx-md', ts: '2026-11-01 10:02:00 +0300', type: 'md', owner: 'default', work_id: 't_1', subject: 'Approve Markdown: fixture', status: 'pending', artifact: { name: 'doc.md', version: '1' }, attachments: [], decision: null },
 ]
 const PREVIEW = {
-  'fx-pdf': [{ name: 'fixture.pdf', content_type: 'application/pdf', kind: 'pdf', size: 2327209, data_url: 'data:application/pdf;base64,JVBERi0xLjQK', thumb_url: 'data:image/png;base64,iVBORw0KGgo=', pages: 119 }],
-  'fx-svg': [{ name: 'logo.svg', content_type: 'image/svg+xml', kind: 'image', size: 7060, data_url: 'data:image/svg+xml;base64,PHN2Zy8+', thumb_url: null, pages: 0 }],
+  'fx-pdf': [{ name: 'fixture.pdf', content_type: 'application/pdf', kind: 'pdf', size: 2327209, data_url: 'data:application/pdf;base64,JVBERi0xLjQK', thumb_url: 'data:image/png;base64,iVBORw0KGgo=', pages: 119, stored_path: '/home/euphoria/euphoria-v2/work/approval-inbox/files/fx-pdf/fixture.pdf' }],
+  'fx-svg': [{ name: 'logo.svg', content_type: 'image/svg+xml', kind: 'image', size: 7060, data_url: 'data:image/svg+xml;base64,PHN2Zy8+', thumb_url: null, pages: 0, stored_path: '/home/euphoria/euphoria-v2/work/approval-inbox/files/fx-svg/logo.svg' }],
   'fx-md': [],
 }
+const PAGE = { page: 1, pages: 119, data_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==' }
 
 let sdkSrc = ''
 for (const n of PROVEN_SDK) {
   if (n in AREAS) sdkSrc += `export const ${n} = '${AREAS[n]}';\n`
   else if (n === 'host') sdkSrc += `export const host = { notify: () => {}, navigate: () => {}, state: {} };\n`
   else if (n === 'queryClient') sdkSrc += `export const queryClient = { invalidateQueries: () => {} };\n`
-  else if (n === 'useQuery') sdkSrc += `export const useQuery = (opts) => { const k = JSON.stringify(opts && opts.queryKey || []); const d = k.includes('preview') ? globalThis.__preview[opts.queryKey[2]] || [] : globalThis.__items; return { data: d, isLoading: false, isPending: false, isError: false, error: null, refetch: () => {} } };\n`
+  else if (n === 'captureGatewayFileDownload') sdkSrc += `export const captureGatewayFileDownload = () => (path, name) => { globalThis.__saved = { path, name } };\n`
+  else if (n === 'useQuery') sdkSrc += `export const useQuery = (opts) => { const k = JSON.stringify((opts && opts.queryKey) || []); const d = k.includes('"page"') ? globalThis.__page : (k.includes('preview') ? globalThis.__preview[opts.queryKey[2]] || [] : globalThis.__items); return { data: d, isLoading: false, isPending: false, isError: false, error: null, refetch: () => {} } };\n`
   else if (n === 'useMutation') sdkSrc += `export const useMutation = () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false });\n`
   else sdkSrc += `export const ${n} = function ${n}(props) { return props && props.children !== undefined ? props.children : null };\n`
 }
@@ -58,6 +60,7 @@ writeFileSync(join(TMP, 'jsx-runtime.mjs'), `export const jsx = (t, p) => ({ typ
 
 globalThis.__items = ITEMS
 globalThis.__preview = PREVIEW
+globalThis.__page = PAGE
 
 let src = readFileSync(PLUGIN, 'utf8')
 src = src.replaceAll(`from '@hermes/plugin-sdk'`, `from './sdk.mjs'`)
@@ -139,18 +142,20 @@ try {
     const mount = (type, props, override) => { globalThis.__stateSeq = 0; globalThis.__stateOverride = override || {}; return render(el(type, props)) }
     const pv = mount(t.PreviewBlock, { msgId: 'fx-pdf', hasFiles: true, onFullscreen: () => {} })
     const dl = walk(pv).filter(n => n.host === 'a' && n.props.download)
-    if (!dl.length) failures.push('the PDF detail offers no download anchor')
+    if (!dl.length) failures.push('the PDF detail offers no save')
     const dlUrls = dl.map(a => String(a.props.href))
-    if (dlUrls.some(u => !/^(data:|https?:)/.test(u))) failures.push(`the PDF download is not a data:/http(s): URL: ${JSON.stringify(dlUrls.map(u => u.slice(0, 30)))}`)
+    if (dlUrls.some(u => !/^(data:|https?:)/.test(u))) failures.push(`the PDF save is not a data:/http(s): URL: ${JSON.stringify(dlUrls.map(u => u.slice(0, 30)))}`)
     const label = textOf(pv)
     if (!/PDF document/i.test(label)) failures.push('the PDF block carries no format-specific approval text')
     if (!/119/.test(label)) failures.push('the PDF block does not state the page count')
     if (!/fixture\.pdf/.test(label)) failures.push('the PDF block does not name the file')
-    // expanded (state 1 is the block's own `expanded`): the reader must be the bytes
+    // expanded (state 1 is the block's own `expanded`): the reader shows the PAGE
     const pvOpen = mount(t.PreviewBlock, { msgId: 'fx-pdf', hasFiles: true, onFullscreen: () => {} }, { 1: 'fixture.pdf' })
-    const obj = walk(pvOpen).filter(n => n.host === 'object')
-    if (!obj.length) failures.push('the expanded PDF detail has no reader object')
-    if (obj.some(o => !/^(data:|https?:)/.test(String(o.props.data)))) failures.push('the PDF reader is bound to a relative URL')
+    const pageImg = walk(pvOpen).filter(n => n.host === 'img' && /^data:image\/png/.test(String(n.props.src)))
+    if (!pageImg.length) failures.push('the expanded PDF shows no rendered page image')
+    const openText = textOf(pvOpen)
+    if (!/Page 1 of 119/.test(openText)) failures.push(`the PDF reader does not state the page position: ${openText.slice(0, 160)}`)
+    if (!openText.includes('Prev') || !openText.includes('Next')) failures.push('the PDF reader has no Prev/Next controls')
     const img = walk(mount(t.PreviewBlock, { msgId: 'fx-svg', hasFiles: true, onFullscreen: () => {} })).filter(n => n.host === 'img')
     if (!img.length) failures.push('the SVG detail renders no image at all')
     if (img.some(i => !/^data:/.test(String(i.props.src)))) failures.push('an image in the detail is not a data: URL')
@@ -160,6 +165,9 @@ try {
   const raw = readFileSync(PLUGIN, 'utf8')
   if (/window\.open\(/.test(raw)) failures.push('window.open( is present — a plugin cannot open a window')
   if (/useRef/.test(raw.replace(/^.*useRef[^\n]*not available[^\n]*$/m, ''))) failures.push('useRef referenced — the host react shim does not export it')
+  if (!/captureGatewayFileDownload\(\)/.test(raw)) failures.push('the native file-save door is never captured alongside the read')
+  if (!/door\(f\.stored_path, f\.name\)/.test(raw)) failures.push('the captured save door is never used with the backend persisted path')
+  if (/href: '#', download/.test(raw)) failures.push('a save control would fall back to a dead # link')
 } catch (e) {
   const st = String((e && e.stack) || '').split('\n').slice(1, 4).map(s => s.trim()).join(' | ')
   failures.push(`render threw: ${String((e && e.message) || e).slice(0, 300)} :: ${st}`)

@@ -276,6 +276,32 @@ def _pdf_thumb(pdf_path):
         return None, 0
 
 
+def _pdf_page(pdf_path, n, dpi=96):
+    """PNG bytes for one page, or None when rendering is unavailable.
+
+    The Desktop cannot paint a PDF inside a plugin pane (Electron ships no PDF
+    viewer and the plugin SDK renders absolute http(s):/data: URLs only), so the
+    reader shows the page as an image. pdftoppm already renders the thumbnail,
+    so this adds no dependency.
+    """
+    try:
+        import tempfile
+        n = int(n or 1)
+        if n < 1:
+            return None
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "page")
+            proc = subprocess.run(["pdftoppm", "-png", "-f", str(n), "-l", str(n),
+                                   "-singlefile", "-r", str(int(dpi)), pdf_path, out],
+                                  capture_output=True, timeout=30)
+            if proc.returncode != 0:
+                return None
+            with open(out + ".png", "rb") as fh:
+                return fh.read()
+    except Exception:
+        return None
+
+
 def _resolve_actor(request):
     gw = (request.headers.get("x-hermes-user") or "").strip()[:64] if request is not None else ""
     if gw:
@@ -574,6 +600,30 @@ def serve_file(msg_id: str, name: str):
     return FileResponse(path, media_type=_guess_type(safe_name), filename=safe_name)
 
 
+@router.get("/page/{msg_id}/{name}")
+def pdf_page(msg_id: str, name: str, n: int = Query(1, ge=1, le=4000)):
+    """One page of a PDF as a PNG data URL, for the in-panel reader.
+
+    The Desktop draws absolute http(s): or data: URLs only, so a page travels as
+    its bytes. pdftoppm renders it; no new dependency is introduced.
+    """
+    safe_msg = re.sub(r"[^A-Za-z0-9._-]", "_", msg_id or "")[:64]
+    safe_name = _safe_name(name)
+    if safe_name != name:
+        raise HTTPException(status_code=404, detail="not found")
+    path = os.path.join(FILES_DIR, safe_msg, safe_name)
+    if not _within(FILES_DIR, path) or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="not found")
+    if _guess_type(safe_name) != "application/pdf":
+        raise HTTPException(status_code=400, detail="not a pdf")
+    raw = _pdf_page(path, n)
+    if raw is None:
+        raise HTTPException(status_code=422, detail="page render unavailable")
+    _thumb, pages = _pdf_thumb(path)
+    return {"page": int(n), "pages": pages,
+            "data_url": "data:image/png;base64," + base64.b64encode(raw).decode("ascii")}
+
+
 @router.get("/preview/{msg_id}")
 def preview(msg_id: str):
     """Inline preview packet: data URLs the renderer can use directly in
@@ -587,7 +637,11 @@ def preview(msg_id: str):
             continue
         entry = {"name": a["name"], "content_type": a["content_type"],
                  "kind": a["kind"], "size": size, "data_url": None,
-                 "thumb_url": None, "pages": 0}
+                 "thumb_url": None, "pages": 0,
+                 # The gateway's own persisted path for this file. The renderer
+                 # hands it to captureGatewayFileDownload() on an explicit save
+                 # gesture; a guessed workspace path is never valid.
+                 "stored_path": path}
         cap = MAX_VIDEO_INLINE_BYTES if a["kind"] == "video" else MAX_INLINE_BYTES
         try:
             with open(path, "rb") as fh:

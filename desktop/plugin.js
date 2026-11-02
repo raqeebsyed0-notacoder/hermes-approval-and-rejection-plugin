@@ -22,6 +22,7 @@
 
 import {
   Badge, Button, ConfirmDialog, EmptyState, ErrorState, GlyphSpinner,
+  captureGatewayFileDownload,
   host, Input, PALETTE_AREA, ROUTES_AREA, ScrollArea, SearchField,
   SegmentedControl, SIDEBAR_NAV_AREA, queryClient,
   useMutation, useQuery,
@@ -31,7 +32,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.8.0'
+const APP_VERSION = '0.9.0'
 
 let rest = null
 let storeGet = null
@@ -253,16 +254,42 @@ function useDecide() {
   })
 }
 
+// The SDK's file-save door, captured alongside each preview read (the documented
+// pattern: capture immediately before the REST read and keep the action with the
+// data) and keyed by file name. It carries that read's connection/profile scope, so
+// it is never captured at click time; a save always streams the gateway's own
+// persisted path through Electron's authenticated bridge and native dialog.
+const doorByFile = {}
+
 function usePreview(msgId, hasFiles) {
   return useQuery({
     queryKey: [ID, 'preview', msgId],
     queryFn: async () => {
+      const door = typeof captureGatewayFileDownload === 'function' ? captureGatewayFileDownload() : null
       const out = await rest(`/preview/${msgId}`)
-      return Array.isArray(out?.items) ? out.items : []
+      const items = Array.isArray(out?.items) ? out.items : []
+      if (door) for (const f of items) if (f && f.name) doorByFile[f.name] = door
+      return items
     },
     staleTime: 60000,
     retry: 1,
     enabled: !!hasFiles,
+  })
+}
+
+// One PDF page as an image. The Desktop ships no PDF viewer inside a plugin pane, so
+// the page travels from the backend as its rendered bytes and is drawn as an image —
+// inside the SDK's absolute-http(s)/data: contract, with no extra dependency.
+function usePdfPage(msgId, name, n, enabled) {
+  return useQuery({
+    queryKey: [ID, 'page', msgId, name, n],
+    queryFn: async () => {
+      const out = await rest(`/page/${encodeURIComponent(msgId)}/${encodeURIComponent(name)}?n=${n}`)
+      return out && out.data_url ? out : null
+    },
+    staleTime: 300000,
+    retry: 1,
+    enabled: !!enabled && !!name,
   })
 }
 
@@ -296,6 +323,9 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
   const pv = usePreview(msgId, hasFiles)
   const [expanded, setExpanded] = useState(null)
   const [dims, setDims] = useState({})
+  const [pages, setPages] = useState({})
+  const curPage = (expanded && pages[expanded]) || 1
+  const pageQ = usePdfPage(msgId, expanded, curPage, !!expanded)
   if (!hasFiles || pv.isLoading) return null
   if (pv.isError) {
     const status = pv.error && (pv.error.status || pv.error.statusCode)
@@ -344,19 +374,37 @@ function PreviewBlock({ msgId, hasFiles, onFullscreen }) {
         f.thumb_url ? jsx('img', { className: 'h-24 w-24 cursor-pointer rounded-md border border-(--ui-stroke-secondary)', src: f.thumb_url, alt: `${f.name} first page`, title: `${f.name}${f.pages ? ` · ${f.pages} pages` : ''} · tap to read`, onClick: () => setExpanded(expanded === f.name ? null : f.name) }) : null,
         jsx('span', { className: 'min-w-0 flex-1 break-all text-xs text-(--ui-text-secondary)', children: `${f.name}${f.pages ? ` · ${f.pages}p` : ''} · ${fmtSize(f.size)}` }),
       jsx('div', { className: 'flex items-center gap-1.5', children: [
-        // A plugin may only render absolute http(s): or data: URLs — a relative
-        // path renders nothing and only warns. Opening a window on a relative path
-        // is a dead click in Electron, which is why the previous Open button did
-        // nothing. The bytes are already here as a data: URL, so the save is direct.
-        f.data_url ? jsx('a', { href: f.data_url, download: f.name, className: 'shrink-0', children:
-          jsx(Button, { size: 'xs', variant: 'ghost', asChild: false, children: f.pages ? `Download (${f.pages}p)` : 'Download' }) }) : null,
-        f.data_url ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Read here' }) : null,
+        // Save. The SDK's documented file-save door, when the preview read captured
+        // one, streams the backend's own persisted path through Electron's
+        // authenticated bridge and native save dialog. The data: anchor stays as the
+        // fallback so the control never dead-ends, and the same bytes are behind it.
+        f.data_url || f.stored_path ? jsx('a', { href: f.data_url || '#', download: f.name, className: 'shrink-0',
+          onClick: (e) => {
+            const door = doorByFile[f.name]
+            if (door && f.stored_path) { e.preventDefault(); try { door(f.stored_path, f.name) } catch (_) {} }
+          },
+          children: jsx(Button, { size: 'xs', variant: 'ghost', asChild: false, children: f.pages ? `Save (${f.pages}p)` : 'Save' }) }) : null,
+        f.pages ? jsx(Button, { size: 'xs', variant: 'ghost', onClick: () => setExpanded(expanded === f.name ? null : f.name), children: expanded === f.name ? 'Close' : 'Read here' }) : null,
       ] }),
       ] }),
-      expanded === f.name && f.data_url ? jsxs('div', { className: 'flex w-full flex-col gap-2', children: [
-        jsx('object', { type: 'application/pdf', data: f.data_url, className: 'w-full rounded-sm border border-(--ui-stroke-tertiary)', style: { height: '24rem' }, children:
-          jsx('div', { className: 'p-3 text-xs text-(--ui-text-secondary)', children: 'This build cannot paint the PDF inline. Use Download, then open it in your reader.' }) }),
-        jsxs('span', { className: 'text-[0.625rem] text-(--ui-text-quaternary)', children: `${f.pages || '?'} page(s) · ${fmtSize(f.size)} · page 1 shown above` }),
+      expanded === f.name ? jsxs('div', { className: 'flex w-full flex-col gap-2', children: [
+        pageQ.isError
+          ? jsx('div', { className: 'rounded-sm border border-(--ui-stroke-tertiary) p-3 text-xs text-(--ui-text-secondary)', children: 'This page could not be rendered here. Use Save, then open the file in your reader.' })
+          : pageQ.data && pageQ.data.data_url
+            ? jsx('div', { className: PLATE, style: PLATE_STYLE, children:
+                jsx('img', { className: 'w-full rounded-sm', src: pageQ.data.data_url, alt: `${f.name} page ${curPage}` }) })
+            : jsxs('div', { className: 'flex items-center gap-2 rounded-sm border border-(--ui-stroke-tertiary) p-3 text-xs text-(--ui-text-secondary)', children: [
+                jsx(GlyphSpinner, {}), jsx('span', { children: 'Rendering page…' }),
+              ] }),
+        jsxs('div', { className: 'flex items-center gap-2', children: [
+          jsx(Button, { size: 'xs', variant: 'ghost', disabled: curPage <= 1,
+            onClick: () => setPages(p => ({ ...p, [f.name]: Math.max(1, (p[f.name] || 1) - 1) })), children: 'Prev' }),
+          jsx('span', { className: 'text-xs text-(--ui-text-quaternary)', children: `Page ${curPage} of ${f.pages || (pageQ.data && pageQ.data.pages) || '?'}` }),
+          jsx(Button, { size: 'xs', variant: 'ghost', disabled: !!f.pages && curPage >= f.pages,
+            onClick: () => setPages(p => ({ ...p, [f.name]: (p[f.name] || 1) + 1 })), children: 'Next' }),
+          jsx('span', { className: 'ml-auto truncate text-[0.625rem] text-(--ui-text-quaternary)', title: `${f.name} · ${fmtSize(f.size)}`,
+            children: `${fmtSize(f.size)} · Save to open in your reader` }),
+        ] }),
       ]}) : null,
     ], key: f.name })),
     ...mds.map(f => jsxs('div', { className: 'w-full overflow-hidden rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary)', children: [

@@ -15,9 +15,12 @@ globalThis.document = {
   getElementById: () => null,
 }
 
-// SDK stub: ONLY the proven newswire surface. Anything else -> explosive Proxy
-// so a missing export throws exactly like a real Desktop would.
-const PROVEN_SDK = ['Badge','Button','ConfirmDialog','Dialog','DialogContent','DialogDescription','DialogFooter','DialogHeader','DialogTitle','EmptyState','ErrorState','GlyphSpinner','host','Input','PALETTE_AREA','ROUTES_AREA','ScrollArea','SearchField','SegmentedControl','Separator','SIDEBAR_NAV_AREA','Switch','atom','queryClient','useMutation','useQuery','useValue']
+// SDK stub: ONLY the proven surface — the newswire set, plus names verified against
+// the SDK's own export list and the app's own bundled plugins:
+// `captureGatewayFileDownload` is exported at apps/desktop/src/sdk/index.ts and
+// imported by the app's kanban plugin (apps/desktop/src/plugins/kanban/api.ts).
+// Anything else -> explosive Proxy so a missing export throws exactly like a real Desktop would.
+const PROVEN_SDK = ['Badge','Button','ConfirmDialog','Dialog','DialogContent','DialogDescription','DialogFooter','DialogHeader','DialogTitle','EmptyState','ErrorState','GlyphSpinner','captureGatewayFileDownload','host','Input','PALETTE_AREA','ROUTES_AREA','ScrollArea','SearchField','SegmentedControl','Separator','SIDEBAR_NAV_AREA','Switch','atom','queryClient','useMutation','useQuery','useValue']
 // Real area values from apps/desktop/src (routes.ts, command-palette/contrib.ts):
 // a quoted 'SIDEBAR_NAV_AREA' string does NOT match 'sidebar.nav' and registers
 // into a dead bucket with zero errors. The stub must use real values.
