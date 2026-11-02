@@ -18,6 +18,7 @@
  * real host does if one is imported.
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -25,7 +26,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // RENDER_CHECK_PLUGIN lets a regression proof point this at a mutated copy; normal
 // runs read the repo file.
 const PLUGIN = process.env.RENDER_CHECK_PLUGIN || join(__dirname, '..', '..', 'desktop', 'plugin.js')
-const TMP = join(__dirname, '.tmp-render')
+// Scratch files go to the OS temp dir, never the repo: a check that dirties the
+// working tree makes every later `git status` read a false signal.
+const TMP = join(tmpdir(), 'approval-inbox-render-check')
 mkdirSync(TMP, { recursive: true })
 
 const PROVEN_SDK = ['Badge','Button','ConfirmDialog','EmptyState','ErrorState','GlyphSpinner','captureGatewayFileDownload','host','Input','PALETTE_AREA','ROUTES_AREA','ScrollArea','SearchField','SegmentedControl','SIDEBAR_NAV_AREA','queryClient','useMutation','useQuery']
