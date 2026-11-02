@@ -27,11 +27,11 @@ import {
   useMutation, useQuery,
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.7.7'
+const APP_VERSION = '0.7.8'
 
 let rest = null
 let storeGet = null
@@ -399,11 +399,16 @@ function groupHeader(label, count) {
 function FeedRow({ item, selected, onSelect }) {
   const decided = item.status !== 'pending'
   // Keyboard navigation moves the selection; the list follows it without the
-  // reviewer having to reach for the scrollbar.
-  const ref = useRef(null)
-  useEffect(() => { if (selected && ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }) }, [selected])
+  // reviewer reaching for the scrollbar. Done by lookup on the row's own id
+  // attribute: the plugin host's react shim exports useState/useEffect/useMemo
+  // only, so useRef is not available to a disk plugin.
+  useEffect(() => {
+    if (!selected || typeof document === 'undefined') return
+    const el = document.querySelector(`[data-msg-id="${item.msg_id}"]`)
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' })
+  }, [selected])
   return jsxs('div', {
-    ref,
+    'data-msg-id': item.msg_id,
     className: `flex w-full min-w-0 cursor-pointer gap-2 rounded-md border border-transparent p-2 outline-none hover:bg-(--ui-row-hover-background) focus-visible:outline focus-visible:outline-1 focus-visible:outline-(--ui-accent)${selected ? ' bg-(--ui-row-active-background) border-(--ui-stroke-secondary)' : ''}${decided ? ' opacity-60' : ''}`,
     onClick: () => onSelect(item.msg_id),
     role: 'button',
