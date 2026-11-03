@@ -36,9 +36,15 @@ Restart the desktop serve child so the backend mounts at
   Pending first, newest first; decided cards dim.
 - Approve asks for confirmation naming the artifact; reject takes a reason
   that travels with the decision. Failures surface as an error toast.
-- Every decision wakes the default agent: approve carries out exactly the
-  next action shown, reject stops it and relays the reason to the owner.
-  The ledger record alone never moves work — the trigger does.
+- Every decision wakes the session you are working in: the reply is injected
+  into your live desktop session, so approve carries out exactly the next
+  action shown and reject stops it and relays the reason to the owner. If no
+  live session is reachable (Desktop closed) it falls back to creating the
+  board card. The ledger record alone never moves work — the trigger does.
+- Live-session injection is opt-in: set
+  `plugins.entries.approval-inbox.allow_gateway_injection: true` in the
+  profile's `config.yaml`. Unset means fail-closed — the decision falls back
+  to the board card instead of reaching a session.
 
 ## Submitting with files
 

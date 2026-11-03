@@ -337,6 +337,80 @@ def _extract_task_id(text):
     return m.group(0) if m else (text or "").strip()[:200]
 
 
+def _gateway_injection_allowed():
+    """The plugin's own opt-in gate (plugins.entries.approval-inbox.allow_gateway_injection).
+
+    Declared in config so a decision can wake a live session; a missing key fails closed.
+    """
+    try:
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly() or {}
+        entry = ((cfg.get("plugins") or {}).get("entries") or {}).get("approval-inbox") or {}
+        return entry.get("allow_gateway_injection") is True
+    except Exception:
+        return False
+
+
+def _live_session_key():
+    """session_key of the most recently active live session hosted by THIS process.
+
+    The dashboard/serve process hosts the desktop sessions (``tui_gateway.server._sessions``)
+    and mounts this plugin's API, so the Founder's running session is reachable in-process.
+    Returns None when no live session exists here (Desktop closed, or a different process).
+    """
+    try:
+        from tui_gateway import server as _gw
+    except Exception:
+        return None
+    sessions = getattr(_gw, "_sessions", None)
+    if not sessions:
+        return None
+    try:
+        items = list(sessions.items())
+    except Exception:
+        return None
+    best = None
+    for _sid, s in items:
+        if not isinstance(s, dict):
+            continue
+        if s.get("lazy") or s.get("_closing") or s.get("_finalized"):
+            continue
+        key = s.get("session_key")
+        if not key:
+            continue
+        try:
+            la = float(s.get("last_active") or 0)
+        except Exception:
+            la = 0.0
+        if best is None or la > best[0]:
+            best = (la, key)
+    return best[1] if best else None
+
+
+def _inject_live_session(text):
+    """Deliver the decision into the Founder's LIVE session; returns its session_key or None.
+
+    This is the primary trigger: the decision must land in the session the Founder is in,
+    not a detached board worker. A miss returns None so the caller can still route via kanban.
+    """
+    if not _gateway_injection_allowed():
+        _oplog("trigger", "inject-denied", "allow_gateway_injection not set")
+        return None
+    key = _live_session_key()
+    if not key:
+        _oplog("trigger", "inject-no-session", "")
+        return None
+    try:
+        from hermes_cli.plugins import get_plugin_manager
+        ok = get_plugin_manager().inject_tui_message(
+            session_key=key, content=text, plugin_id="approval-inbox")
+        _oplog("trigger", "injected" if ok else "inject-refused", str(key)[:32])
+        return key if ok else None
+    except Exception as e:
+        _oplog("trigger", "inject-error", str(e)[:200])
+        return None
+
+
 def _trigger_default(decision, req, note, actor):
     """Wake the default agent with the Founder's verdict (exactly-once per msg)."""
     if os.environ.get("APPROVAL_INBOX_NO_TRIGGER") == "1":
@@ -360,6 +434,11 @@ def _trigger_default(decision, req, note, actor):
         "on reject, stop that action and relay the reason to the owning agent.",
     ])
     title = f"[{'APPROVED' if decision == 'approve' else 'REJECTED'}] {req.get('subject') or req.get('msg_id')}"
+    # PRIMARY: land the decision in the Founder's LIVE session (the one he is running in).
+    # Only when no live session is reachable here do we fall back to the board-card route.
+    live_key = _inject_live_session(packet)
+    if live_key:
+        return {"triggered": True, "via": "live_session", "session_key": live_key}
     try:
         env = dict(os.environ)
         env.setdefault("HERMES_HOME", HERMES_HOME)
