@@ -633,10 +633,35 @@ def submit(payload: SubmitPayload):
 
 
 class DecidePayload(BaseModel):
+    """A decision body. The reason is deliberately NOT length-validated.
+
+    A 500-character cap used to live on ``note``; a real rejection reason exceeded it,
+    the whole request 422'd before any handler ran, and the Founder's decision and his
+    written review were both lost. A reason must never be able to block a decision, so
+    an over-long note is clipped in the handler (with an explicit marker) instead of
+    being rejected here.
+    """
+
     msg_id: str
     decision: str
-    note: str = Field(default="", max_length=500)
+    note: str = Field(default="")
     artifact_version: Optional[str] = None
+
+
+MAX_NOTE_CHARS = 20000
+
+
+def _clip_note(note, limit=MAX_NOTE_CHARS):
+    """Clip an over-long reason without ever failing the decision.
+
+    Returns (kept_text, was_clipped). The kept text carries the original length so the
+    ledger reader knows something was cut and how much.
+    """
+    text = note or ""
+    if len(text) <= limit:
+        return text, False
+    tail = f" …[truncated: {len(text)} chars submitted, first {limit} kept]"
+    return text[: max(0, limit - len(tail))] + tail, True
 
 
 @router.get("/ops/log")
@@ -760,9 +785,13 @@ def decide(payload: DecidePayload, request: Request):
             _oplog("decide", "rejected-version", payload.msg_id[:50])
             raise HTTPException(status_code=409, detail="artifact version changed; approval invalid")
     actor, actor_source = _resolve_actor(request)
+    # A reason must never block a decision: an over-long note is clipped, not refused.
+    note, clipped = _clip_note(payload.note)
+    if clipped:
+        _oplog("decide", "note-clipped", f"{payload.msg_id} {len(payload.note or '')} chars")
     rc, out, err = _run_agent_mail([
         "approve", "--msg-id", payload.msg_id, "--decision", payload.decision,
-        "--note", payload.note or "", "--task-id", str(req.get("work_id") or "-"),
+        "--note", note, "--task-id", str(req.get("work_id") or "-"),
     ])
     if rc != 0:
         combined = f"{err}\n{out}"
@@ -829,7 +858,7 @@ def decide(payload: DecidePayload, request: Request):
                 _oplog("decide", "spend-register-failed", str(exc)[:200])
     # Wake the default agent with the verdict — the decision must travel,
     # not just sit in the ledger. A trigger failure never voids the decision.
-    trigger = _trigger_default(payload.decision, req, payload.note, actor)
+    trigger = _trigger_default(payload.decision, req, note, actor)
     return {"ok": True, "msg_id": payload.msg_id, "decision": payload.decision,
             "actor": actor, "actor_source": actor_source,
             "stdout": out, "trigger": trigger}

@@ -32,7 +32,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.9.2'
+const APP_VERSION = '0.9.3'
 
 let rest = null
 let storeGet = null
@@ -553,9 +553,20 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
         jsx(StatusBadge, { status: item.status }),
         decision.note ? jsxs('span', { className: 'text-xs text-(--ui-text-secondary)', children: [decision.note, ' · ', absTime(decision.ts)] }) : null,
       ]}),
-      rejectOpen ? jsxs('div', { className: 'flex w-full min-w-0 flex-wrap items-center gap-2', children: [
-        jsx(Input, { className: 'min-w-0 flex-1', value: rejectNote, onChange: (e) => onRejectNoteChange(asText(e)), placeholder: 'Reason for rejection…', 'aria-label': 'Rejection reason' }),
-        jsx(Button, { size: 'sm', variant: 'outline', onClick: sendReject, disabled: busy || decide.isPending, children: 'Send rejection' }),
+      rejectOpen ? jsxs('div', { className: 'flex w-full min-w-0 flex-col gap-2', children: [
+        jsx('textarea', {
+          className: 'w-full resize-y rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-editor) p-2 text-xs text-(--ui-text-primary)',
+          value: rejectNote,
+          onChange: (e) => onRejectNoteChange(e.target.value),
+          placeholder: 'Reason for rejection — what is wrong, and what must change…',
+          'aria-label': 'Rejection reason',
+          rows: 4,
+        }),
+        jsxs('div', { className: 'flex w-full min-w-0 items-center gap-2', children: [
+          jsx('span', { className: 'shrink-0 text-[10px] text-(--ui-text-quaternary)', children: `${rejectNote.length} characters — write as much as you need` }),
+          jsx('span', { className: 'flex-1' }),
+          jsx(Button, { size: 'sm', variant: 'outline', onClick: sendReject, disabled: busy || decide.isPending, children: 'Send rejection' }),
+        ]}),
       ]}) : null,
     ]}),
     jsx(ConfirmDialog, {
@@ -752,9 +763,13 @@ function InboxPane() {
 
   const sendReject = () => {
     if (!selectedItem) return
-    decide.mutate({ item: selectedItem, decision: 'reject', note: rejectNote })
-    setRejectOpen(false)
-    setRejectNote('')
+    // Close and clear ONLY once the server accepted the decision. Closing first used to
+    // discard the written reason on any failure (a 422 lost both the reason and the
+    // decision), so a failed send must leave the box open with the text intact.
+    decide.mutate(
+      { item: selectedItem, decision: 'reject', note: rejectNote },
+      { onSuccess: () => { setRejectOpen(false); setRejectNote('') } }
+    )
   }
 
   const handleRetrySubmit = async () => {

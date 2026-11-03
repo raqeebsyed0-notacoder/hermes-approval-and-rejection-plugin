@@ -79,7 +79,11 @@ writeFileSync(join(TMP, 'sdk.mjs'), sdkSrc)
 // control's state change survives into the next render. No useRef, like the host.
 writeFileSync(join(TMP, 'react.mjs'),
   `export const useState = (init) => { const n = (globalThis.__h.seq = (globalThis.__h.seq || 0) + 1); const s = globalThis.__h.store; if (!(n in s)) s[n] = (typeof init === 'function' ? init() : init); return [s[n], (v) => { s[n] = typeof v === 'function' ? v(s[n]) : v }] };\nexport const useEffect = () => {};\nexport const useMemo = (f) => (typeof f === 'function' ? f() : f);\nexport default {};\n`)
-writeFileSync(join(TMP, 'jsx-runtime.mjs'), `export const jsx = (t, p) => ({ type: t, props: p || {} });\nexport const jsxs = (t, p) => ({ type: t, props: p || {} });\n`)
+writeFileSync(join(TMP, 'jsx-runtime.mjs'), `const HOST_FIELDS = new Set(['input','textarea','select']);
+const asControl = (t, p) => { const props = p || {}; if (typeof t === 'string' && HOST_FIELDS.has(t)) globalThis.__h.controls.push({ kind: t, label: String(props.placeholder || props['aria-label'] || ''), aria: String(props['aria-label'] || ''), props }); return { type: t, props }; };
+export const jsx = (t, p) => asControl(t, p);
+export const jsxs = (t, p) => asControl(t, p);
+`)
 
 let src = readFileSync(PLUGIN, 'utf8')
 src = src.replaceAll(`from '@hermes/plugin-sdk'`, `from './sdk.mjs'`)
@@ -199,12 +203,12 @@ try {
   // 7. Reject: note first, then send
   press('Reject', 'Button')
   tree = mount()
-  const noteInput = ctl('Reason for rejection', 'Input')
+  const noteInput = ctl('Reason for rejection', 'textarea')
   check('Reject reveals the reason field', !!noteInput)
   noteInput.props.onChange({ target: { value: 'not good enough' }, preventDefault() {} })
   tree = mount()
-  check('the typed reason is kept in state', String(ctl('Reason for rejection', 'Input').props.value) === 'not good enough',
-    `value=${ctl('Reason for rejection', 'Input').props.value}`)
+  check('the typed reason is kept in state', String(ctl('Reason for rejection', 'textarea').props.value) === 'not good enough',
+    `value=${ctl('Reason for rejection', 'textarea').props.value}`)
   press('Send rejection', 'Button')
   const rejectCall = h.rest.find(r => r.path === '/decide' && r.opts.body.decision === 'reject')
   check('Send rejection POSTs /decide reject WITH the note', !!rejectCall && rejectCall.opts.body.note === 'not good enough',

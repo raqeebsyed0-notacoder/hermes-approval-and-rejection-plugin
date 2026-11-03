@@ -199,14 +199,38 @@ def test_bad_attachment_rejected(c):
     assert r.status_code == 400
 
 
-def test_note_capped_at_500(c):
+def test_long_rejection_reason_never_blocks_the_decision(c):
+    """A reason must never cost the Founder his decision.
+
+    Regression: `note` carried max_length=500, so a real rejection reason 422'd before
+    any handler ran — the decision was never recorded and the written review was lost.
+    The reason cap is gone; an over-long note is clipped in the handler instead.
+    """
     payload = {"type": "post", "owner": "x", "work_id": "t_note",
                "artifact": {"name": "a", "version": "v1"}}
     r = c.post("/api/plugins/approval-inbox/submit", json=payload)
     msg_id = r.json()["msg_id"]
+    long_note = "the heading font is missing and the layout needs " * 40  # > 500 chars
+    assert len(long_note) > 500
     r2 = c.post("/api/plugins/approval-inbox/decide",
-                json={"msg_id": msg_id, "decision": "reject", "note": "x" * 600})
-    assert r2.status_code == 422
+                json={"msg_id": msg_id, "decision": "reject", "note": long_note})
+    assert r2.status_code == 200
+    assert r2.json()["decision"] == "reject"
+    # the reason travelled with the decision, not into a 422
+    item = next(i for i in c.get("/api/plugins/approval-inbox/items").json()["items"]
+                if i["msg_id"] == msg_id)
+    assert item["status"] == "rejected"
+
+
+def test_oversize_note_is_clipped_not_refused():
+    import dashboard.plugin_api as papi
+
+    kept, clipped = papi._clip_note("y" * (papi.MAX_NOTE_CHARS + 5000))
+    assert clipped is True
+    assert len(kept) <= papi.MAX_NOTE_CHARS
+    assert "truncated" in kept
+    same, was = papi._clip_note("short reason")
+    assert same == "short reason" and was is False
 
 
 def test_decide_reports_trigger_and_actor(c):
