@@ -11,6 +11,14 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
+
+# NOTE: deliberately NO module-level import from tui_gateway.server.
+# A missing symbol there once failed the entire plugin mount, so every
+# /api/plugins/approval-inbox/* path 404d and the desktop panel showed
+# "Could not load approvals". That module's helpers are resolved lazily
+# and defensively below instead (see _live_session_key).
+
+from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -354,37 +362,48 @@ def _gateway_injection_allowed():
 def _live_session_key():
     """session_key of the most recently active live session hosted by THIS process.
 
-    The dashboard/serve process hosts the desktop sessions (``tui_gateway.server._sessions``)
-    and mounts this plugin's API, so the Founder's running session is reachable in-process.
+    The dashboard/serve process hosts the desktop sessions and mounts this plugin's API,
+    so the Founder's running session is reachable in-process.
     Returns None when no live session exists here (Desktop closed, or a different process).
     """
+    # Resolve tui_gateway.server defensively. A hard symbol import here un-mounted this
+    # plugin's whole API when the installed harness lacked it (panel 404). Prefer the
+    # installed helper when it exists; otherwise read the live session table directly.
     try:
-        from tui_gateway import server as _gw
+        from tui_gateway import server as _tgs
     except Exception:
         return None
-    sessions = getattr(_gw, "_sessions", None)
-    if not sessions:
-        return None
-    try:
-        items = list(sessions.items())
-    except Exception:
-        return None
-    best = None
-    for _sid, s in items:
-        if not isinstance(s, dict):
-            continue
-        if s.get("lazy") or s.get("_closing") or s.get("_finalized"):
-            continue
-        key = s.get("session_key")
-        if not key:
-            continue
+
+    helper = getattr(_tgs, "get_most_active_session_key", None)
+    if callable(helper):
         try:
-            la = float(s.get("last_active") or 0)
+            key = helper()
+            if key:
+                return key
         except Exception:
-            la = 0.0
-        if best is None or la > best[0]:
-            best = (la, key)
-    return best[1] if best else None
+            pass  # fall through to the direct read
+
+    sessions = getattr(_tgs, "_sessions", None)
+    if not isinstance(sessions, dict) or not sessions:
+        return None
+
+    best_key, best_ts = None, None
+    for _sid, sess in list(sessions.items()):
+        if not isinstance(sess, dict):
+            continue
+        key = str(sess.get("session_key") or "").strip()
+        if not key or sess.get("lazy"):
+            continue
+        ts = (sess.get("last_active") or sess.get("last_active_at")
+              or sess.get("updated_at") or sess.get("created_at") or 0)
+        try:
+            ts = float(ts)
+        except Exception:
+            ts = 0.0
+        # >= so a tie keeps the most recently inserted session (dict order).
+        if best_ts is None or ts >= best_ts:
+            best_key, best_ts = key, ts
+    return best_key
 
 
 def _inject_live_session(text):

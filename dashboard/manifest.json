@@ -3,6 +3,6 @@
   "label": "Approval Inbox",
   "description": "One desktop inbox for approval requests routed through the default agent.",
   "icon": "inbox",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "api": "plugin_api.py"
 }
