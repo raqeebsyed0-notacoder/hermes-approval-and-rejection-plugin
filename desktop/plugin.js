@@ -32,7 +32,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.9.4'
+const APP_VERSION = '0.9.5'
 
 let rest = null
 let storeGet = null
@@ -513,7 +513,7 @@ function RequestList({ items, selectedId, onSelect, needle }) {
   ] })
 }
 
-function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen, onApproveClick, onRejectClick, rejectOpen, rejectNote, onRejectNoteChange, sendReject, onBack, panelTab, onPanelTabChange, retryNote, onRetryNoteChange, onRetrySubmit, retryBusy }) {
+function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen, onApproveClick, onRejectClick, rejectOpen, rejectNote, onRejectNoteChange, sendReject, onReviewClick, reviewOpen, reviewNote, onReviewNoteChange, sendReview, onBack, panelTab, onPanelTabChange, retryNote, onRetryNoteChange, onRetrySubmit, retryBusy }) {
   const msgId = item?.msg_id
   const hasFiles = (item?.attachments?.length || 0) > 0
   const pv = usePreview(msgId, hasFiles)
@@ -549,6 +549,7 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
       !decided ? jsxs('div', { className: 'flex flex-wrap items-center gap-2', children: [
         jsx(Button, { size: 'sm', onClick: onApproveClick, disabled: busy || decide.isPending, children: (busy || decide.isPending) ? 'Working…' : 'Approve' }),
         jsx(Button, { size: 'sm', variant: 'ghost', onClick: onRejectClick, disabled: busy || decide.isPending, children: rejectOpen ? 'Cancel rejection' : 'Reject' }),
+        jsx(Button, { size: 'sm', variant: 'ghost', onClick: onReviewClick, disabled: busy || decide.isPending, children: reviewOpen ? 'Cancel review' : 'Add review' }),
       ]}) : jsxs('div', { className: 'flex flex-wrap items-center gap-2', children: [
         jsx(StatusBadge, { status: item.status }),
         decision.note ? jsxs('span', { className: 'text-xs text-(--ui-text-secondary)', children: [decision.note, ' · ', absTime(decision.ts)] }) : null,
@@ -566,6 +567,21 @@ function CenterWorkspace({ item, decide, busy, zoom, onZoomChange, onFullscreen,
           jsx('span', { className: 'shrink-0 text-[10px] text-(--ui-text-quaternary)', children: `${rejectNote.length} characters — write as much as you need` }),
           jsx('span', { className: 'flex-1' }),
           jsx(Button, { size: 'sm', variant: 'outline', onClick: sendReject, disabled: busy || decide.isPending, children: 'Send rejection' }),
+        ]}),
+      ]}) : null,
+      reviewOpen ? jsxs('div', { className: 'flex w-full min-w-0 flex-col gap-2', children: [
+        jsx('textarea', {
+          className: 'w-full resize-y rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-editor) p-2 text-xs text-(--ui-text-primary)',
+          value: reviewNote,
+          onChange: (e) => onReviewNoteChange(e.target.value),
+          placeholder: 'Your review — notes, conditions, what to change or keep. This does NOT decide the item; it stays open…',
+          'aria-label': 'Review note',
+          rows: 4,
+        }),
+        jsxs('div', { className: 'flex w-full min-w-0 items-center gap-2', children: [
+          jsx('span', { className: 'shrink-0 text-[10px] text-(--ui-text-quaternary)', children: `${reviewNote.length} characters — the item stays open` }),
+          jsx('span', { className: 'flex-1' }),
+          jsx(Button, { size: 'sm', variant: 'outline', onClick: sendReview, disabled: busy || decide.isPending, children: 'Send review' }),
         ]}),
       ]}) : null,
     ]}),
@@ -708,6 +724,8 @@ function InboxPane() {
   const [approveOpen, setApproveOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
   const [rejectNote, setRejectNote] = useState('')
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewNote, setReviewNote] = useState('')
   const [retryNote, setRetryNote] = useState('')
   const [retryBusy, setRetryBusy] = useState(false)
 
@@ -757,6 +775,8 @@ function InboxPane() {
     setRejectOpen(false)
     setApproveOpen(false)
     setRejectNote('')
+    setReviewOpen(false)
+    setReviewNote('')
     setRetryNote('')
     setRetryBusy(false)
   }, [selectedId])
@@ -769,6 +789,16 @@ function InboxPane() {
     decide.mutate(
       { item: selectedItem, decision: 'reject', note: rejectNote },
       { onSuccess: () => { setRejectOpen(false); setRejectNote('') } }
+    )
+  }
+
+  const sendReview = () => {
+    if (!selectedItem || !reviewNote.trim()) return
+    // Same rule as a rejection: close and clear the box ONLY once the server accepted.
+    // A review never decides the item — it stays pending in the list.
+    decide.mutate(
+      { item: selectedItem, decision: 'review', note: reviewNote },
+      { onSuccess: () => { setReviewOpen(false); setReviewNote('') } }
     )
   }
 
@@ -852,7 +882,7 @@ function InboxPane() {
               })
             })
           : selectedItem
-            ? jsx(CenterWorkspace, { item: selectedItem, decide, busy, zoom, onZoomChange: setZoom, onFullscreen: setFullscreen, onBack: setSelectedId, onApproveClick: () => setApproveOpen(true), onRejectClick: () => setRejectOpen(true), rejectOpen, rejectNote, onRejectNoteChange: setRejectNote, sendReject })
+            ? jsx(CenterWorkspace, { item: selectedItem, decide, busy, zoom, onZoomChange: setZoom, onFullscreen: setFullscreen, onBack: setSelectedId, onApproveClick: () => setApproveOpen(true), onRejectClick: () => setRejectOpen(true), rejectOpen, rejectNote, onRejectNoteChange: setRejectNote, sendReject, onReviewClick: () => setReviewOpen(true), reviewOpen, reviewNote, onReviewNoteChange: setReviewNote, sendReview })
             : jsx(RequestList, { items: visible, selectedId, onSelect: setSelectedId, needle }),
       selectedItem && jsx(RightPanel, { item: selectedItem, tab: rightTab, onTabChange: setRightTab, retryNote, onRetryNoteChange: setRetryNote, onRetrySubmit: handleRetrySubmit, retryBusy }),
     ]}),

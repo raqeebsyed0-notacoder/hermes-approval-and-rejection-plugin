@@ -430,10 +430,108 @@ def _inject_live_session(text):
         return None
 
 
+def _origin_of(req):
+    """Where the item came from — and therefore where the Founder's answer goes.
+
+    Founder ruling 2026-11-04: "only when you are pushing a task for approval in approval
+    inbox, it should hit the live chat... anything that comes from paperclip should go to
+    paperclip." An approval that CAME FROM PAPERCLIP is answered IN PAPERCLIP — its verdict
+    lands on the issue. Only an item an AGENT raised goes to the live session.
+    """
+    meta = req.get("meta") or {}
+    declared = str(meta.get("origin") or "").strip().lower()
+    if declared in ("paperclip", "agent"):
+        return declared
+    ident = str(req.get("work_id") or req.get("task_id") or "").strip()
+    return "paperclip" if re.fullmatch(r"EUP-\d+", ident) else "agent"
+
+
+def _paperclip_cfg():
+    """(base, key, company) for the Paperclip API. Values are read, never logged."""
+    vals = {}
+    for path in (os.path.join(HERMES_HOME, ".env"), os.path.join(REPO, ".hermes", ".env")):
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line.startswith("PAPERCLIP_") and "=" in line:
+                        k, _, v = line.partition("=")
+                        vals.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        except OSError:
+            continue
+    base = (os.environ.get("PAPERCLIP_API_URL") or vals.get("PAPERCLIP_API_URL") or "").rstrip("/")
+    key = os.environ.get("PAPERCLIP_API_KEY") or vals.get("PAPERCLIP_API_KEY") or ""
+    company = (os.environ.get("PAPERCLIP_COMPANY_ID")
+               or vals.get("PAPERCLIP_COMPANY_ID") or "")
+    return base, key, company
+
+
+def _paperclip_call(method, url, key, payload=None):
+    import urllib.request
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=45) as resp:
+        body = resp.read().decode("utf-8", "ignore")
+    return json.loads(body) if body.strip() else {}
+
+
+def _trigger_paperclip(decision, req, note, actor):
+    """Record the Founder's verdict ON THE PAPERCLIP ISSUE. Never touches the live session.
+
+    approve -> status done (the issue closes)
+    reject  -> status todo, with the reason (back to the owner)
+    review  -> comment only, status untouched (the item stays open)
+    A failure here is reported, never allowed to void the decision.
+    """
+    ident = str(req.get("work_id") or "").strip()
+    if not re.fullmatch(r"EUP-\d+", ident):
+        return {"triggered": False, "via": "paperclip",
+                "reason": f"not a Paperclip issue: {ident[:40]}"}
+    base, key, company = _paperclip_cfg()
+    if not base or not company:
+        _oplog("trigger", "paperclip-unconfigured", "PAPERCLIP_API_URL / COMPANY_ID missing")
+        return {"triggered": False, "via": "paperclip",
+                "reason": "Paperclip API not configured in this process"}
+    try:
+        listing = _paperclip_call("GET", f"{base}/companies/{company}/issues", key)
+        rows = listing if isinstance(listing, list) else (listing.get("issues") or [])
+        issue = next((r for r in rows
+                      if str(r.get("identifier") or r.get("id")) == ident), None)
+        if not issue:
+            _oplog("trigger", "paperclip-not-found", ident)
+            return {"triggered": False, "via": "paperclip", "reason": f"issue {ident} not found"}
+        verdict = {"approve": "APPROVED", "reject": "REJECTED",
+                   "review": "REVIEW NOTE"}.get(decision, decision.upper())
+        head = (f"Founder {verdict} via the desktop Approval Inbox ({req.get('msg_id')})"
+                f", recorded by {actor}.")
+        body = {"comment": f"{head}\n\n{note}" if note else head}
+        if decision == "approve":
+            body["status"] = "done"
+        elif decision == "reject":
+            body["status"] = "todo"
+        # A review is a note, not a ruling: no status field travels with it.
+        _paperclip_call("PATCH", f"{base}/issues/{issue.get('id')}", key, body)
+        _oplog("trigger", f"paperclip-{decision}", f"{ident} {req.get('msg_id')}")
+        return {"triggered": True, "via": "paperclip", "issue": ident,
+                "status": body.get("status") or "(unchanged)"}
+    except Exception as e:
+        _oplog("trigger", "paperclip-error", str(e)[:200])
+        return {"triggered": False, "via": "paperclip", "reason": str(e)[:200]}
+
+
 def _trigger_default(decision, req, note, actor):
     """Wake the default agent with the Founder's verdict (exactly-once per msg)."""
     if os.environ.get("APPROVAL_INBOX_NO_TRIGGER") == "1":
         return {"triggered": False, "reason": "disabled by env"}
+    # Origin decides where the answer goes (Founder ruling 2026-11-04). An approval that CAME
+    # FROM PAPERCLIP is answered IN PAPERCLIP: approve/reject/review land on the issue itself.
+    # It must never be injected into the live session, and no board card is created for it.
+    # An item an AGENT raised into the inbox is the other way round: it goes to the live session.
+    if _origin_of(req) == "paperclip":
+        return _trigger_paperclip(decision, req, note, actor)
     hermes_bin = _resolve_hermes_bin()
     if not hermes_bin:
         _oplog("trigger", "failed", "hermes binary not found (PATH + fallbacks)")
@@ -787,9 +885,10 @@ def preview(msg_id: str):
 
 @router.post("/decide")
 def decide(payload: DecidePayload, request: Request):
-    if payload.decision not in ("approve", "reject"):
+    if payload.decision not in ("approve", "reject", "review"):
         _oplog("decide", "rejected-bad-decision", payload.decision[:50])
-        raise HTTPException(status_code=400, detail="decision must be approve or reject")
+        raise HTTPException(status_code=400,
+                            detail="decision must be approve, reject or review")
     # find request
     req = next((x for x in _requests() if x["msg_id"] == payload.msg_id), None)
     if req is None:
@@ -808,6 +907,27 @@ def decide(payload: DecidePayload, request: Request):
     note, clipped = _clip_note(payload.note)
     if clipped:
         _oplog("decide", "note-clipped", f"{payload.msg_id} {len(payload.note or '')} chars")
+    if payload.decision == "review":
+        # "Add review" is a NOTE, not a ruling (Founder, 2026-11-04). It never decides the
+        # item, never writes a decision record and never touches the versions sidecar: the
+        # item stays open and the note travels to the item's own origin — the Paperclip issue
+        # for a Paperclip-raised item, the live session for an agent-raised one.
+        if _origin_of(req) == "paperclip":
+            route = _trigger_paperclip("review", req, note, actor)
+        else:
+            text = "\n".join([
+                "Founder review note (not a decision — the item stays open)",
+                f"msg_id: {payload.msg_id}",
+                f"work_id: {req.get('work_id') or '-'}",
+                f"subject: {req.get('subject') or '-'}",
+                f"note: {note or '(no note)'}",
+            ])
+            key = _inject_live_session(text)
+            route = {"triggered": bool(key), "via": "live_session", "session_key": key}
+        _oplog("review", "note-routed", f"{payload.msg_id} via {route.get('via')}")
+        return {"ok": True, "msg_id": payload.msg_id, "decision": "review",
+                "actor": actor, "actor_source": actor_source, "note_recorded": True,
+                "status": "pending", "trigger": route}
     rc, out, err = _run_agent_mail([
         "approve", "--msg-id", payload.msg_id, "--decision", payload.decision,
         "--note", note, "--task-id", str(req.get("work_id") or "-"),
