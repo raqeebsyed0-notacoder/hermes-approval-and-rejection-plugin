@@ -479,6 +479,12 @@ def _paperclip_cfg():
         except OSError:
             continue
     base = (os.environ.get("PAPERCLIP_API_URL") or vals.get("PAPERCLIP_API_URL") or "").rstrip("/")
+    # The configured URL is the SERVER ROOT; the API lives under /api. Without this the panel's
+    # calls hit the web app instead of the API and come back as the SPA (measured: HTTP 200 with
+    # content-type text/html), which fails to parse and parks the verdict. The approval bridge
+    # already carries this same guard.
+    if base and not base.endswith("/api"):
+        base = base + "/api"
     # Precedence for the panel: its own provisioned key, then the process env, then .env.
     # The ambient env key can be an expired per-run token (measured: HTTP 401 on a live read),
     # so when the panel has its own key that one must win.
