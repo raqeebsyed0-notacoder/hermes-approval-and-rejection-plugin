@@ -478,6 +478,28 @@ def _paperclip_call(method, url, key, payload=None):
     return json.loads(body) if body.strip() else {}
 
 
+def _park_verdict(decision, req, note, actor, reason):
+    """Never lose the Founder's answer.
+
+    The dashboard process holds no durable Paperclip credential — the gateway env carries only
+    PAPERCLIP_API_URL, and the ambient PAPERCLIP_API_KEY is an expired per-run agent token — so a
+    direct write can 401. When it cannot reach Paperclip the verdict is parked on disk, complete,
+    for an actor that holds a live token to apply. A decision is never dropped on a transport error.
+    """
+    out_dir = os.path.join(DATA_DIR, "outbound-verdicts")
+    os.makedirs(out_dir, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(req.get("msg_id") or "unknown"))[:64]
+    path = os.path.join(out_dir, f"{safe}.json")
+    rec = {"ts": datetime.now(timezone.utc).isoformat(), "target": "paperclip",
+           "decision": decision, "issue": req.get("work_id"), "msg_id": req.get("msg_id"),
+           "subject": req.get("subject"), "note": note, "actor": actor,
+           "status": "pending-apply", "why": str(reason)[:200]}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(rec, fh, ensure_ascii=False, indent=2)
+    _oplog("trigger", "paperclip-verdict-parked", path)
+    return path
+
+
 def _trigger_paperclip(decision, req, note, actor):
     """Record the Founder's verdict ON THE PAPERCLIP ISSUE. Never touches the live session.
 
@@ -493,8 +515,9 @@ def _trigger_paperclip(decision, req, note, actor):
     base, key, company = _paperclip_cfg()
     if not base or not company:
         _oplog("trigger", "paperclip-unconfigured", "PAPERCLIP_API_URL / COMPANY_ID missing")
+        path = _park_verdict(decision, req, note, actor, "Paperclip API not configured")
         return {"triggered": False, "via": "paperclip",
-                "reason": "Paperclip API not configured in this process"}
+                "reason": "Paperclip API not configured in this process", "parked": path}
     try:
         listing = _paperclip_call("GET", f"{base}/companies/{company}/issues", key)
         rows = listing if isinstance(listing, list) else (listing.get("issues") or [])
@@ -502,7 +525,9 @@ def _trigger_paperclip(decision, req, note, actor):
                       if str(r.get("identifier") or r.get("id")) == ident), None)
         if not issue:
             _oplog("trigger", "paperclip-not-found", ident)
-            return {"triggered": False, "via": "paperclip", "reason": f"issue {ident} not found"}
+            path = _park_verdict(decision, req, note, actor, f"issue {ident} not found")
+            return {"triggered": False, "via": "paperclip",
+                    "reason": f"issue {ident} not found", "parked": path}
         verdict = {"approve": "APPROVED", "reject": "REJECTED",
                    "review": "REVIEW NOTE"}.get(decision, decision.upper())
         head = (f"Founder {verdict} via the desktop Approval Inbox ({req.get('msg_id')})"
@@ -519,7 +544,9 @@ def _trigger_paperclip(decision, req, note, actor):
                 "status": body.get("status") or "(unchanged)"}
     except Exception as e:
         _oplog("trigger", "paperclip-error", str(e)[:200])
-        return {"triggered": False, "via": "paperclip", "reason": str(e)[:200]}
+        path = _park_verdict(decision, req, note, actor, f"{type(e).__name__}: {e}")
+        return {"triggered": False, "via": "paperclip", "reason": str(e)[:200],
+                "parked": path}
 
 
 def _trigger_default(decision, req, note, actor):

@@ -118,3 +118,25 @@ def test_an_unconfigured_paperclip_is_blocked_loudly(monkeypatch):
     monkeypatch.setattr(api, "_paperclip_cfg", lambda: ("", "", ""))
     out = api._trigger_paperclip("approve", {"work_id": "EUP-361", "msg_id": "m1"}, "", "founder")
     assert out["triggered"] is False and "not configured" in out["reason"]
+
+
+def test_a_401_parks_the_verdict_instead_of_losing_it(monkeypatch, tmp_path):
+    """The live path 401s when the process holds only an expired per-run token. The Founder's
+    answer must survive that: it is written out complete, marked pending-apply."""
+    monkeypatch.setattr(api, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(api, "_paperclip_cfg", lambda: ("http://pc", "stale", "co"))
+
+    def boom(method, url, key, payload=None):
+        raise RuntimeError("HTTP Error 401: Unauthorized")
+
+    monkeypatch.setattr(api, "_paperclip_call", boom)
+    out = api._trigger_paperclip("approve", {"work_id": "EUP-361", "msg_id": "m1"},
+                                 "ship it", "founder")
+    assert out["triggered"] is False
+    import json as _json
+    import os as _os
+    assert _os.path.exists(out["parked"])
+    rec = _json.load(open(out["parked"], encoding="utf-8"))
+    assert rec["decision"] == "approve" and rec["issue"] == "EUP-361"
+    assert rec["note"] == "ship it" and rec["status"] == "pending-apply"
+    assert "401" in rec["why"]
