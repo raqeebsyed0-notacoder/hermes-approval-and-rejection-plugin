@@ -32,7 +32,7 @@ import { useState, useEffect } from 'react'
 
 const ID = 'approval-inbox'
 const PAGE_PATH = '/approval-inbox'
-const APP_VERSION = '0.9.6'
+const APP_VERSION = '0.9.7'
 
 let rest = null
 let storeGet = null

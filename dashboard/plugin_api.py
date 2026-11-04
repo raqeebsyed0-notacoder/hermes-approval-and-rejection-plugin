@@ -446,6 +446,25 @@ def _origin_of(req):
     return "paperclip" if re.fullmatch(r"EUP-\d+", ident) else "agent"
 
 
+def _paperclip_plugin_key():
+    """The panel's OWN durable Paperclip key, if one has been provisioned.
+
+    Kept in its own file rather than `.env` on purpose: `.env` is loaded with override=True into
+    every agent run, so a key there would displace the fresh per-run token Paperclip injects and
+    change attribution for agent work. This file is read only by the panel.
+    """
+    for path in (os.path.join(HERMES_HOME, "paperclip-plugin.key"),
+                 os.path.join(REPO, ".hermes", "paperclip-plugin.key")):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                v = fh.read().strip()
+            if v:
+                return v
+        except OSError:
+            continue
+    return ""
+
+
 def _paperclip_cfg():
     """(base, key, company) for the Paperclip API. Values are read, never logged."""
     vals = {}
@@ -460,7 +479,12 @@ def _paperclip_cfg():
         except OSError:
             continue
     base = (os.environ.get("PAPERCLIP_API_URL") or vals.get("PAPERCLIP_API_URL") or "").rstrip("/")
-    key = os.environ.get("PAPERCLIP_API_KEY") or vals.get("PAPERCLIP_API_KEY") or ""
+    # Precedence for the panel: its own provisioned key, then the process env, then .env.
+    # The ambient env key can be an expired per-run token (measured: HTTP 401 on a live read),
+    # so when the panel has its own key that one must win.
+    key = (_paperclip_plugin_key()
+           or os.environ.get("PAPERCLIP_API_KEY")
+           or vals.get("PAPERCLIP_API_KEY") or "")
     company = (os.environ.get("PAPERCLIP_COMPANY_ID")
                or vals.get("PAPERCLIP_COMPANY_ID") or "")
     return base, key, company
